@@ -1,0 +1,30 @@
+const assert=require('node:assert/strict');
+const {createDemo}=require('../demo.js');
+const demo=createDemo();
+const overview=demo.request('/api/overview');
+assert.equal(overview.runtime.operationEnabled,false);
+assert.equal(demo.request('/api/course-library').courses.length,15);
+assert.equal(overview.control.catalog.enrolled.length,2);
+const plan={...overview.config,courses:[overview.control.catalog.available[0]]};
+const id=demo.request('/api/tasks','POST',{plan}).task.id;
+demo.request('/api/tasks/'+id,'POST',{action:'start',configRevision:demo.snapshot()[0].configRevision});
+assert.equal(demo.request('/api/overview').tasks[0].pollLogs.length,1);
+assert.match(demo.request('/api/overview').tasks[0].pollLogs[0].message,/暂无空位/);
+demo.request('/api/tasks/'+id,'POST',{action:'pause'});
+assert.equal(demo.request('/api/overview').tasks[0].state.phase,'paused');
+demo.request('/api/tasks/'+id,'POST',{action:'stop'});
+assert.equal(demo.request('/api/overview').tasks[0].state.active,false);
+for(let i=0;i<110;i++){
+  demo.request('/api/tasks/'+id,'POST',{action:'start',configRevision:demo.snapshot()[0].configRevision});
+  demo.request('/api/overview');
+}
+assert.equal(demo.snapshot()[0].pollLogs.length,100);
+const restored=createDemo(demo.snapshot());
+assert.equal(restored.request('/api/overview').tasks[0].state.active,false);
+for(const action of ['login','logout','start','cancel','drop','ocr-test'])assert.throws(()=>demo.request('/api/control','POST',{action}));
+assert.throws(()=>demo.request('/api/config','POST',{account:{password:'never-store-this'}}));
+assert.throws(()=>demo.request('https://elective.pku.edu.cn/'));
+assert.throws(()=>demo.request('/api/selftest','POST',{}));
+assert.throws(()=>demo.request('/api/tasks','POST',{plan:{...plan,courses:[{name:'private course'}]}}));
+assert.equal(JSON.stringify(demo.snapshot()).includes('never-store-this'),false);
+console.log('Demo checks passed: synthetic data, task controls, log cap, stopped restore, real actions blocked.');

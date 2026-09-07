@@ -3,6 +3,7 @@ import copy
 import threading
 import time
 import random
+from requests.exceptions import RequestException
 from .config import AutoElectiveConfig
 from .environ import Environ
 from .logger import redact_sensitive
@@ -28,6 +29,7 @@ class Controller:
         self.captcha = {}
         self.logged_in = False
         self.failure = None
+        self.outcome = None
         self.login_time = 0
         self.logout_requested = False
         self.catalog = dict(results=[], available=[], updatedAt=None, note='尚未读取', page=None)
@@ -52,7 +54,7 @@ class Controller:
     def snapshot(self):
         with self.lock:
             return dict(phase=self.phase, active=self.active(), loggedIn=self.logged_in,
-                        failure=self.failure, courses=copy.deepcopy(list(self.rows.values())),
+                        failure=self.failure, outcome=copy.deepcopy(self.outcome), courses=copy.deepcopy(list(self.rows.values())),
                         captcha=copy.deepcopy(self.captcha), catalog=copy.deepcopy(self.catalog), export=copy.deepcopy(self.export))
 
     def log_round(self, env):
@@ -103,6 +105,7 @@ class Controller:
             self.logout_requested = False
             self.resume_event.set()
             self.failure = None
+            self.outcome = None
             if action == 'export-courses':
                 self.export = dict(status='running', pages=0, rows=0, message='准备登录查询', filename=None)
             self.phase = 'testing' if action == 'ocr-test' else 'starting'
@@ -201,15 +204,18 @@ class Controller:
                     for cid, row in self.rows.items():
                         if cid not in done and row['status'] != '互斥跳过':
                             row['status'] = '本轮尚未检查：先处理前序课程，下一轮继续检查'
+                            row['reasonCode'] = 'queued'
                     for cid, goal in goals.items():
                         if goal in elected:
                             done.add(cid)
                             self.rows[cid]['status'] = '已选上'
+                            self.rows[cid]['reasonCode'] = 'confirmed'
                     for rule in cfg.mutexes.values():
                         if any(cid in done for cid in rule.cids):
                             for cid in rule.cids:
                                 if cid not in done:
                                     self.rows[cid]['status'] = '互斥跳过'
+                                    self.rows[cid]['reasonCode'] = 'mutex'
                     for cid, goal in goals.items():
                         self.checkpoint()
                         row = self.rows[cid]
@@ -218,13 +224,16 @@ class Controller:
                         course = next((c for c in plans if c == goal), None)
                         if course is None:
                             row['status'] = '当前第 %s 页未找到，不代表课程不存在；请核对页码与班号' % cfg.supply_cancel_page
+                            row['reasonCode'] = 'not_found'
                             continue
                         row.update(remaining=course.remaining_quota, quota=course.max_quota)
                         if not course.is_available():
                             row['status'] = '暂无空位（余量 %s / 总名额 %s），继续等待' % (course.remaining_quota, course.max_quota)
+                            row['reasonCode'] = 'no_seats'
                             continue
                         if cid in delays and course.remaining_quota > delays[cid]:
                             row['status'] = '未达到设置的提交条件：余量 %s，需不超过 %s' % (course.remaining_quota, delays[cid])
+                            row['reasonCode'] = 'threshold'
                             continue
                         image = self.call(self.client.get_DrawServlet)
                         tick = time.perf_counter()
@@ -235,34 +244,45 @@ class Controller:
                                             source='选课网', validation='通过' if checked == '2' else '失败')
                         if checked != '2':
                             row['status'] = '验证码失败，下一轮重试'
+                            row['reasonCode'] = 'captcha'
                             break
                         row['attempts'] += 1
                         try:
                             self.call(self.client.get_ElectSupplement, course.href)
                             row['status'] = '响应待确认'
+                            row['reasonCode'] = 'pending_confirmation'
                         except ElectionSuccess:
                             row['status'] = '提交成功，等待复核'
+                            row['reasonCode'] = 'pending_confirmation'
                         except TipsException as exc:
                             row['status'] = '学校返回提示，尚未确认选上：' + redact_sensitive(str(exc))
+                            row['reasonCode'] = 'ineligible' if any(text in str(exc) for text in
+                                ('不符合选课条件', '不满足选课条件', '没有选课资格', '不具备选课资格')) else 'school_notice'
                         # Refresh official results before any second submission.
                         break
                     failures = 0
+                    self.outcome = None
                     self.log_round(env)
                     if all(cid in done or r['status'] == '互斥跳过' for cid,r in self.rows.items()):
                         self.phase = 'completed'
                         return
                 except NotInOperationTimeError:
                     self.phase = 'waiting_window'
+                    self.outcome = dict(code='window_closed', message='学校返回不在操作时段；任务已停止，不会自动重试')
                     self.log_poll(env, 'warning', '本次未选上：学校返回不在操作时段，任务已停止')
                     return
                 except CaughtCheatingError:
+                    self.outcome = dict(code='school_block', message='学校禁止当前自动操作，已停止；请使用官方页面')
                     self.log_poll(env, 'error', '学校提示禁止刷课，本次未确认选上，任务停止，不再重试')
                     raise RuntimeError('学校提示禁止刷课，已停止。请改用学校官方页面，不自动重试。')
                 except (SessionExpiredError, InvalidTokenError):
+                    self.outcome = dict(code='session_expired', message='登录会话失效，本轮未完成检查；正在重新登录')
                     self.log_poll(env, 'warning', '登录会话失效，本次未完成检查；正在重新登录')
                     self.login(cfg)
                 except Exception as exc:
                     failures += 1
+                    self.outcome = dict(code='network_error' if isinstance(exc, RequestException) else 'check_failed',
+                                        message='本轮检查未完成：' + redact_sensitive(str(exc)))
                     self.log_poll(env, 'error', '本次检查未完成（连续失败 %s 次），不能确认当前余量或选课结果：%s' % (failures, redact_sensitive(str(exc))))
                     if failures >= 5:
                         raise RuntimeError('连续失败 5 次，已停止。请查看运行记录。') from exc

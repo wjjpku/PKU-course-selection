@@ -21,3 +21,5 @@ skj包/log/
 local.pku.workbench.plist
 .agents/
 .codex/
+.vercel/
+node_modules/

@@ -2,7 +2,7 @@
 
 北大选课本地工作台：课程查询与时间预览、独立刷课任务、最近 100 条轮询日志、SQLite 任务持久化，以及 macOS 后台服务入口。
 
-工作台版本 **0.1.0** · [版本说明](releases/v0.1.0.md) · [更新记录](CHANGELOG.md) · [快速使用](使用说明.md) · [贡献指南](CONTRIBUTING.md)
+最新已发布版本 **0.1.0** · [版本说明](releases/v0.1.0.md) · [未发布改动与更新记录](CHANGELOG.md) · [快速使用](docs/usage.md) · [文档导航](docs/README.md) · [贡献指南](CONTRIBUTING.md)
 
 这是源码项目，不是安装后即可自动选课的程序。已验证环境为 macOS / Python 3.12；其他平台尚未完整验证。前端不需要安装 Node.js 或打包，Node.js 仅用于开发测试。
 
@@ -70,4 +70,29 @@ CSV 的「课程类型」按学校查询入口定义（例如从专业课入口�
 
 ## 来源与许可
 
-本项目基于原 PKUAutoElective 系列代码扩展，保留 [原项目说明](skj包/README.md) 和 [MIT 许可证及原作者声明](skj包/LICENSE)。前端参考思路见 [来源说明](前端改进来源与边界.md)，未直接复制 PKU Art 用户脚本。
+本项目基于原 PKUAutoElective 系列代码扩展，保留 [原项目说明](skj包/README.md) 和 [MIT 许可证及原作者声明](skj包/LICENSE)。前端参考思路见 [来源说明](docs/frontend-sources.md)，未直接复制 PKU Art 用户脚本。
+
+## 项目目录
+
+```text
+pkuskj/
+├── README.md / CHANGELOG.md / CONTRIBUTING.md
+├── docs/                    使用、后台服务、多任务和来源说明
+├── scripts/                 离线检查、展示版构建
+├── showcase/                与真实账号隔离的展示源码
+│   └── tests/               展示模拟器测试
+├── releases/                已发布版本的说明
+├── skj包/                   现有应用目录（保留以兼容启动路径）
+│   ├── autoelective/        Python 后端
+│   ├── web/                 本地前端
+│   ├── test/                后端与前端回归、历史 OCR 样本
+│   ├── model/               模型资源
+│   ├── config.sample.ini    可公开的配置模板
+│   └── data/                私人运行数据，不提交
+├── output/                  构建包、截图等产物，不提交
+├── service-logs/            后台日志，不提交
+├── service_runner.py        已有后台服务入口，保持原位
+└── 启动工作台.command        macOS 启动入口，保持原位
+```
+
+目录职责与维护约定见 [文档导航](docs/README.md)。本地配置、虚拟环境、机器专用服务文件及个人备份保留原位，不随目录整理移动或上传。

@@ -1,0 +1,4 @@
+.demo-banner{max-width:1440px;margin:20px auto 0;padding:22px 26px;border:1px solid var(--line,#e6dde1);border-radius:16px;background:var(--panel,#fff);display:flex;align-items:center;justify-content:space-between;gap:20px}
+.demo-banner h2{font-size:22px;margin:5px 0 8px}.demo-banner p{margin:5px 0;line-height:1.65}.demo-banner .eyebrow{color:var(--brand,#7a1538)}
+.demo-banner .panel-actions{flex-shrink:0}#account-panel,#account-exit,#export-courses-download,#add-course{display:none!important}
+@media(max-width:700px){.demo-banner{margin:12px;flex-direction:column;align-items:stretch;padding:18px}.demo-banner .panel-actions{flex-wrap:wrap}}

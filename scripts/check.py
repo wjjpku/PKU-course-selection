@@ -32,11 +32,11 @@ raise SystemExit(not result.wasSuccessful())
     if not node:
         print('Python checks passed. Install Node.js to run the required frontend checks.', file=sys.stderr)
         return 1
-    for test in ('test_course_query.cjs', 'test_course_planner.cjs', 'test_plan_helpers.cjs'):
+    for test in ('test_course_query.cjs', 'test_course_planner.cjs', 'test_plan_helpers.cjs', 'test_workbench_insights.cjs'):
         result = subprocess.run([node, str(PACKAGE / 'test' / test)], cwd=PACKAGE)
         if result.returncode:
             return result.returncode
-    for file in ('app.js', 'course-query.js', 'course-planner.js'):
+    for file in ('app.js', 'course-query.js', 'course-planner.js', 'workbench-insights.js'):
         result = subprocess.run([node, '--check', str(PACKAGE / 'web' / file)])
         if result.returncode:
             return result.returncode

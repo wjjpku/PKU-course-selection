@@ -24,6 +24,7 @@ def normalize_record(row):
                 school=value('开课单位', '开课院系'), teacher=value('教师', '授课教师'),
                 credits=float(credits) if re.fullmatch(r'\d+(?:\.\d+)?', credits) else None,
                 category=value('课程类别'), major=value('专业'), year=value('年级'),
+                term=value('学期', '开课学期', '学年学期') or None,
                 pnp=value('自选P/NP'), remarks=value('备注'),
                 quota=int(quota[1]) if quota else None,
                 remaining=max(0, int(quota[1])-int(quota[2])) if quota else None,

@@ -1,5 +1,7 @@
 # 工作台后台服务
 
+返回 [文档导航](README.md)。本文中的程序、配置和日志路径均相对项目根目录，不是 `docs/`。
+
 本说明适用于**已经自行配置好 LaunchAgent 的 macOS 安装**。下载仓库不会自动安装后台服务，也不会修改系统设置；新用户可以先按 README 在前台启动。配置 LaunchAgent 时，程序入口使用本机实际项目路径下的 `service_runner.py`，Python 使用本机虚拟环境；机器专用 plist 不随源码分发。
 
 以下假设服务标识设为 `local.pku.workbench`，且已配置 `RunAtLoad`、`KeepAlive` 和 `ThrottleInterval=15`。登录 macOS 后自动启动，退出 Codex、关闭网页或锁屏不停止服务；进程退出后由 launchd 重新启动，重启尝试间隔至少 15 秒。

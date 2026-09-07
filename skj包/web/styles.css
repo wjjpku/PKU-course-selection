@@ -268,3 +268,6 @@ select { min-height: 40px; width: 100%; border: 1px solid var(--line); border-ra
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+:root { --insight-border: #c2b4ba; }
+.course-trust,.task-insight,.data-health{border-left:3px solid var(--insight-border);padding:10px 12px;margin:12px 0;font-size:13px;line-height:1.6;overflow-wrap:anywhere}
+.course-trust p,.task-insight p{margin:4px 0}.task-config{margin-top:12px}.task-config pre{white-space:pre-wrap;overflow-wrap:anywhere}

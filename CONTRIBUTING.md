@@ -6,14 +6,19 @@
 
 ## 代码入口
 
+目录分工见 [文档导航](docs/README.md)。应用测试继续放在 `skj包/test/`；展示测试放在 `showcase/tests/`；构建与检查脚本放在 `scripts/`；生成物放在被忽略的 `output/`。不要为了目录命名而移动运行中的数据或服务入口。
+
 - `skj包/web/course-query.js`：纯本地筛选、字段选项、CSV 导出；可直接用 Node.js 测试。
 - `skj包/web/course-planner.js`：纯时间对照与冲突说明，不发选课请求。
+- `skj包/web/workbench-insights.js`：数据可信度与任务状态说明。
 - `skj包/web/app.js`、`planner.css`：查询卡片、课程篮及任务操作。
 - `skj包/autoelective/course_library.py`：从当前账号导出的 CSV 读取课程库，不访问学校。
 - `skj包/autoelective/course_export.py`：受限的只读课程查询、分页与原始 CSV。
 - `skj包/autoelective/control.py`、`tasks.py`：账号会话及独立任务。修改这里需要特别检查运行安全边界。
 
 ## 提交前检查
+
+除完整离线回归外，涉及展示版时执行 `node showcase/tests/demo.cjs` 和 `node scripts/build-showcase.cjs`；仅部署生成的展示目录，不上传整个项目。
 
 - 用虚构课程和模拟响应覆盖缺字段、无时间、跨入口重复、部分导出等情况；不以真实选退课作为测试。
 - 不把学号、密码、Cookie、数据库、个人课程 CSV 或浏览器截图加入提交。`.gitignore` 不是历史泄密检查，提交前仍应检查暂存内容。

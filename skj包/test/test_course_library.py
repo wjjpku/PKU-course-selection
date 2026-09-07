@@ -36,6 +36,8 @@ class LibraryTests(unittest.TestCase):
         self.assertFalse(result['complete'])
 
     def test_missing_snapshot_and_path_rejection(self):
+        self.assertIsNone(normalize_record(self.row())['term'])
+        self.assertEqual(normalize_record(self.row(学期='2026秋'))['term'],'2026秋')
         self.assertEqual(read_library(None)['courses'], [])
         for filename in ('../config.ini', '/tmp/courses-test.csv', 'config.ini'):
             with self.assertRaises(ValueError):

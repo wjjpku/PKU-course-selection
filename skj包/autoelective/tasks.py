@@ -1,5 +1,7 @@
 """Independent task state; bounded account-wide traffic, no cancellation API."""
 import copy
+import hashlib
+import json
 import math
 import threading
 import time
@@ -8,6 +10,27 @@ from collections import deque
 from .config import AutoElectiveConfig
 from .control import Controller, controller
 from .logger import redact_sensitive
+
+
+class ConfigConflict(ValueError):
+    """The user confirmed a different configuration than the current task."""
+
+
+def plan_revision(plan):
+    return hashlib.sha256(json.dumps(plan, sort_keys=True, ensure_ascii=False,
+                                     allow_nan=False).encode()).hexdigest()
+
+
+def effective_plan(plan, cfg):
+    result = copy.deepcopy(plan)
+    for course in result['courses']:
+        course.update(name=str(course['name']).strip(), school=str(course['school']).strip(),
+                      classNo=int(float(course['classNo'])))
+    result['client'] = dict(refreshInterval=cfg.refresh_interval,
+        randomDeviation=cfg.refresh_random_deviation, page=cfg.supply_cancel_page,
+        loginTimeout=cfg.iaaa_client_timeout, requestTimeout=cfg.elective_client_timeout,
+        maxLife=cfg.elective_client_max_life, poolSize=1)
+    return result
 
 
 class AccountLimiter:
@@ -44,6 +67,7 @@ class TaskEnvironment:
         self.last_poll_at = self.next_poll_at = None
         self.elective_loop = 0
         self.on_change = lambda: None
+        self.config_revision = None
 
     def add_event(self, level, message):
         with self.lock:
@@ -54,7 +78,8 @@ class TaskEnvironment:
         """Independent bounded polling history; lifecycle events cannot evict it."""
         with self.lock:
             self.poll_logs.appendleft(dict(timestamp=int(time.time()), level=level,
-                                          message=redact_sensitive(message)))
+                                          message=redact_sensitive(message),
+                                          configRevision=self.config_revision))
             self.on_change()
 
 
@@ -126,6 +151,7 @@ class TaskManager:
             task = self.tasks.pop(tid)
             task['id'] = saved['id']
             task['createdAt'] = saved['createdAt']
+            task['runningRevision'] = saved.get('runningRevision')
             self.tasks[task['id']] = task
             env = task['env']
             env.events.extend(saved.get('events', [])[:99])
@@ -144,7 +170,9 @@ class TaskManager:
             env = task['env']
             self.store.save(dict(id=task['id'], createdAt=task['createdAt'], plan=task['plan'],
                 events=list(env.events), pollLogs=list(env.poll_logs), loops=env.elective_loop,
-                lastPollAt=env.last_poll_at, rows=task['worker'].rows))
+                lastPollAt=env.last_poll_at, rows=task['worker'].rows,
+                runningRevision=task['runningRevision']))
+            # Running revision is historical after restart; no task is auto-started.
 
     def active(self):
         with self.lock:
@@ -155,6 +183,8 @@ class TaskManager:
             if len(self.tasks) >= 20:
                 raise ValueError('最多保留 20 个任务，请先移除不需要的任务')
             cfg = task_config(plan)
+            plan = effective_plan(plan, cfg)
+            revision = plan_revision(plan)
             identity = set(cfg.courses.values())
             for task in self.tasks.values():
                 if identity.intersection(task['worker'].config.courses.values()):
@@ -163,27 +193,39 @@ class TaskManager:
             env = TaskEnvironment()
             worker = Controller(cfg, env, self.limiter)
             worker.rows = {cid:dict(id=cid,name=c.name,status='尚未启动',attempts=0) for cid,c in cfg.courses.items()}
-            self.tasks[tid] = dict(id=tid, createdAt=int(time.time()), plan=copy.deepcopy(plan), worker=worker, env=env)
+            self.tasks[tid] = dict(id=tid, createdAt=int(time.time()), plan=copy.deepcopy(plan),
+                                  runningRevision=None, worker=worker, env=env)
             task = self.tasks[tid]
+            env.config_revision = revision
             env.on_change = lambda: self.persist(task)
             env.add_event('info', '任务已创建，尚未启动；配置与其他任务独立')
             return tid
 
-    def command(self, tid, action, plan=None):
+    def command(self, tid, action, plan=None, expected_revision=None):
         with self.lock:
             if tid not in self.tasks:
                 raise ValueError('任务不存在')
             task = self.tasks[tid]
             worker = task['worker']
+            if action in ('start', 'update') and expected_revision != plan_revision(task['plan']):
+                raise ConfigConflict('任务配置已变化或页面版本过旧，请刷新后重新确认；本次没有启动或修改任务')
             if action == 'update':
                 if worker.active():
                     raise ValueError('请先停止任务再调整配置')
                 cfg = task_config(plan)
+                normalized = effective_plan(plan, cfg)
+                revision = plan_revision(normalized)
                 for other_id, other in self.tasks.items():
                     if other_id != tid and set(cfg.courses.values()).intersection(other['worker'].config.courses.values()):
                         raise ValueError('课程已存在于其他任务')
                 worker.config = cfg
-                task['plan'] = copy.deepcopy(plan)
+                task['plan'] = normalized
+                task['env'].config_revision = revision
+                worker.rows = {cid:dict(id=cid,name=c.name,status='配置已更新，尚未启动',attempts=0)
+                               for cid,c in cfg.courses.items()}
+                worker.failure = None
+                worker.outcome = None
+                worker.phase = 'stopped'
                 task['env'].add_event('info', '任务配置已更新，下次启动生效')
                 return
             if action == 'remove':
@@ -204,7 +246,14 @@ class TaskManager:
                 # Account credentials are refreshed only when explicitly starting.
                 for key, value in AutoElectiveConfig()._config.items('user'):
                     worker.config._config.set('user', key, value)
-            worker.command(action)
+            previous_revision = task['runningRevision']
+            if action == 'start':
+                task['runningRevision'] = plan_revision(task['plan'])
+            try:
+                worker.command(action)
+            except Exception:
+                task['runningRevision'] = previous_revision
+                raise
             task['env'].add_event('info', '用户操作：' + action)
 
     def snapshot(self):
@@ -213,7 +262,8 @@ class TaskManager:
             for task in self.tasks.values():
                 env = task['env']
                 with env.lock:
-                    result.append(dict(id=task['id'], createdAt=task['createdAt'], plan=task['plan'],
+                    result.append(dict(id=task['id'], createdAt=task['createdAt'], plan=copy.deepcopy(task['plan']),
+                        configRevision=plan_revision(task['plan']), runningRevision=task['runningRevision'],
                         state=task['worker'].snapshot(), loops=env.elective_loop,
                         lastPollAt=env.last_poll_at, nextPollAt=env.next_poll_at, events=list(env.events),
                         pollLogs=list(env.poll_logs)))

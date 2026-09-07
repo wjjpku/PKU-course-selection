@@ -19,3 +19,15 @@ assert.equal(plan.client.refreshInterval, 3.25);
 context.prepareSelectedPlan(plan);
 assert.equal(plan.courses.length, 1);
 console.log('Selected-course preparation checks passed');
+// Refresh failure must keep usable data; a different account must never inherit it.
+context.fetch=async()=>{throw Error('offline fixture failure');};
+vm.runInContext("renderCatalog=()=>{}; state.server={account:{maskedId:'account-a'},control:{export:{filename:'old.csv'},catalog:{}}}; state.library={courses:[{name:'cached'}],accountHint:JSON.stringify(state.server.account)};",context);
+(async()=>{
+  await context.loadCourseLibrary(true);
+  assert.equal(vm.runInContext('state.library.courses.length',context),1);
+  assert.match(vm.runInContext('state.library.error',context),/offline fixture/);
+  vm.runInContext("state.server.account={maskedId:'account-b'}",context);
+  await context.loadCourseLibrary(true);
+  assert.equal(vm.runInContext('state.library.courses.length',context),0);
+  console.log('Failed refresh retention and account isolation checks passed');
+})().catch(error=>{console.error(error);process.exitCode=1;});

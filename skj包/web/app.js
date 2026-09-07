@@ -540,8 +540,10 @@ function bindEvents() {
     const task=state.server.tasks.find(t=>t.id===button.dataset.taskId);if(!task)return;
     const action=button.dataset.taskAction;
     if(action==='start'){
-      $('#start-targets').innerHTML=task.plan.courses.map(c=>`<li>${escapeHtml(c.name)} · 班号 ${escapeHtml(c.classNo)}</li>`).join('');
-      $('#start-policy').textContent=`仅启动此任务。基础等待 ${task.plan.client.refreshInterval} 秒；请求串行，无固定 4 秒下限。`;
+      if(!task.configRevision){reportError(Error('后端尚未提供配置版本校验，请在停止任务后升级并重启后端。'));return;}
+      $('#start-targets').innerHTML=task.plan.courses.map(c=>`<li>${escapeHtml(c.name)} · ${escapeHtml(c.school)} · 班号 ${escapeHtml(c.classNo)} · ${task.plan.delays[c.id]?`余量阈值 ≤ ${escapeHtml(task.plan.delays[c.id])}`:'有空位即尝试'}</li>`).join('');
+      $('#start-policy').textContent=`配置版本 ${task.configRevision.slice(0,8)} · 第 ${task.plan.client.page} 页 · 基础等待 ${task.plan.client.refreshInterval} 秒 · 随机偏移 ${task.plan.client.randomDeviation} · 请求超时 ${task.plan.client.requestTimeout} 秒。不会使用课程篮草稿。`;
+      $('#start-dialog').dataset.taskRevision=task.configRevision;
       $('#start-dialog').dataset.taskId=task.id;$('#start-dialog').showModal();return;
     }
     let plan;
@@ -552,7 +554,7 @@ function bindEvents() {
     }
     if(action==='remove'&&!confirm('只移除此本地任务，不会从学校退课。继续？'))return;
     button.disabled=true;
-    try{await post(`/api/tasks/${task.id}`,{action,plan});await refreshStatus();}catch(e){reportError(e);}finally{button.disabled=false;}
+    try{await post(`/api/tasks/${task.id}`,{action,plan,configRevision:task.configRevision});await refreshStatus();}catch(e){reportError(e);await refreshStatus().catch(()=>{});}finally{button.disabled=false;}
   });
   const debugButton=document.createElement('button');debugButton.className='button secondary';debugButton.dataset.directory='debug';debugButton.textContent='系统调试';$('#main-menu').insertBefore(debugButton,$('#account-exit'));
   const run = $('#run-workspace');
@@ -606,7 +608,7 @@ function bindEvents() {
     button.disabled = true;
     try {
       if ($('#start-dialog').dataset.taskId) {
-        await post(`/api/tasks/${$('#start-dialog').dataset.taskId}`,{action:'start'});
+        await post(`/api/tasks/${$('#start-dialog').dataset.taskId}`,{action:'start',configRevision:$('#start-dialog').dataset.taskRevision});
         $('#start-dialog').close();await refreshStatus();return;
       }
       if (!state.connected || draftIsDirty()) throw new Error('状态或草稿已变化，请重新核对后启动');
@@ -614,7 +616,7 @@ function bindEvents() {
       $('#start-dialog').close();
       await refreshStatus();
       $('#live-courses').scrollIntoView({behavior:'smooth',block:'center'});
-    } catch (error) { $('#start-dialog').close(); reportError(error); }
+    } catch (error) { $('#start-dialog').close(); reportError(error); await refreshStatus().catch(()=>{}); }
     finally { button.disabled = false; }
   });
   $('#course-search').addEventListener('input', () => {state.query.q=$('#course-search').value;state.query.page=1;$('#query-feedback').textContent='';saveQuery();if(state.server)renderCatalog(state.server.control.catalog);});
@@ -833,25 +835,45 @@ function renderControl() {
 function renderTaskModules(){
   const tasks=state.server.tasks||[];
   const open=new Set($$('#task-list details[open]').map(el=>el.dataset.logs));
+  const openConfigs=new Set($$('#task-list details[data-config][open]').map(el=>el.dataset.config));
   const signature=JSON.stringify(tasks);
   if(renderTaskModules.signature!==signature){
     renderTaskModules.signature=signature;
     $('#task-list').innerHTML=tasks.length?tasks.map(t=>{
       const s=t.state;
-      const names={preparation:'待启动',starting:'登录中',running:'运行中',paused:'已请求暂停',stopping:'停止中',stopped:'已停止',completed:'全部完成',error:'运行失败',waiting_window:'不在操作时段'};
+      const names={preparation:'待启动',starting:'登录中',running:'运行中',paused:'已请求暂停',stopping:'停止中',stopped:'已停止',completed:'任务已结束',error:'运行失败',waiting_window:'不在操作时段'};
       const actions=s.active?(s.phase==='paused'?['resume','stop']:['pause','stop']):['start','update','remove'];
       const labels={start:'启动此任务',pause:'暂停',resume:'继续',stop:'停止',update:'调整间隔',remove:'移除任务'};
       return `<article class="task-card"><div class="panel-heading"><h3>${escapeHtml(t.plan.courses.map(c=>c.name).join('、'))}</h3><span class="badge">${escapeHtml(names[s.phase]||s.phase)}</span></div><p>任务 ${escapeHtml(t.id)} · ${t.loops} 轮 · 基础等待 ${escapeHtml(t.plan.client.refreshInterval)} 秒</p><div class="panel-actions">${actions.map(a=>`<button class="button secondary" data-task-id="${t.id}" data-task-action="${a}">${labels[a]}</button>`).join('')}</div>${s.failure?`<p class="form-error">${escapeHtml(s.failure)}</p>`:''}<ul>${s.courses.map(c=>`<li>${escapeHtml(c.name)}：${escapeHtml(c.status)} · 提交 ${c.attempts} 次 · 余量 ${c.remaining??'—'}</li>`).join('')}</ul><details data-logs="${t.id}" ${open.has(t.id)?'open':''}><summary>任务日志（${t.events.length}）</summary><pre>${escapeHtml(t.events.map(e=>`${new Date(e.timestamp*1000).toLocaleTimeString()} ${e.message}`).join('\n')||'尚无日志')}</pre></details></article>`;
     }).join(''):'还没有任务。回到选课首页，选入课程篮，再点击“创建刷课任务”。';
     $$('#task-list > .task-card').forEach((card,index)=>{
       const task=tasks[index];
+      const insight=WorkbenchInsights.taskStatus(task);
+      const status=document.createElement('section');status.className='task-insight';
+      const title=document.createElement('strong');title.textContent=insight.title;
+      const action=document.createElement('p');action.textContent=insight.action;
+      const detail=document.createElement('p');detail.textContent=insight.detail;
+      status.append(title,action,detail);card.insertBefore(status,card.querySelector('.panel-actions'));
+      const configuration=document.createElement('details');configuration.className='task-config';
+      configuration.dataset.config=task.id;configuration.open=openConfigs.has(task.id);
+      const summary=document.createElement('summary');summary.textContent=`已保存任务配置 · ${task.configRevision?.slice(0,8)||'后端待升级'}（不随课程篮改变）`;
+      const courseNames=Object.fromEntries(task.plan.courses.map(c=>[c.id,c.name]));
+      const configText=document.createElement('pre');configText.textContent=[
+        ...task.plan.courses.map(c=>`${c.name} · ${c.school} · ${c.classNo} 班`),
+        `页码 ${task.plan.client.page} · 基础间隔 ${task.plan.client.refreshInterval} 秒 · 随机偏移 ${task.plan.client.randomDeviation}`,
+        `登录超时 ${task.plan.client.loginTimeout} 秒 · 请求超时 ${task.plan.client.requestTimeout} 秒`,
+        task.plan.mutexes.length?task.plan.mutexes.map((m,i)=>`互斥组 ${i+1}：${m.courses.map(id=>courseNames[id]||id).join('、')}`).join('\n'):'未设置互斥组',
+        Object.keys(task.plan.delays).length?Object.entries(task.plan.delays).map(([id,n])=>`${courseNames[id]||id}：余量 ≤ ${n} 时才尝试`).join('\n'):'未设置余量阈值：有空位即尝试',
+        `${task.state.active?'本次':'上次'}运行版本：${task.runningRevision?.slice(0,8)||'尚未记录'}`,
+        '运行中不能调整配置；停止后调整，仅对下一次启动生效。'
+      ].join('\n');configuration.append(summary,configText);card.append(configuration);
       const history=document.createElement('section');history.className='poll-history';
       const heading=document.createElement('h4');heading.textContent=`刷课日志 · 最近 ${(task.pollLogs||[]).length} / 100 条`;
       const hint=document.createElement('p');hint.className='course-meta';hint.textContent='最新在上；每次轮询结果单独保留，超过 100 条自动淘汰最旧记录。';
       const log=document.createElement('pre');
-      log.textContent=task.pollLogs===undefined?'当前服务尚未加载新版轮询日志，需要重启后端后生效。':task.pollLogs.map(e=>`${new Date(e.timestamp*1000).toLocaleTimeString()} ${e.message}`).join('\n\n')||'尚无轮询结果，开始检查后会自动记录。';
+      log.textContent=task.pollLogs===undefined?'当前服务尚未加载新版轮询日志，需要重启后端后生效。':task.pollLogs.map(e=>`${new Date(e.timestamp*1000).toLocaleTimeString()}${e.configRevision?` [配置 ${e.configRevision.slice(0,8)}]`:''} ${e.message}`).join('\n\n')||'尚无轮询结果，开始检查后会自动记录。';
       history.append(heading,hint,log);card.insertBefore(history,card.querySelector('details'));
-      const timing=document.createElement('p');timing.className='course-meta';
+      const timing=document.createElement('p');timing.className='course-meta task-timing';
       const last=task.lastPollAt?new Date(task.lastPollAt*1000).toLocaleTimeString():'尚未完成检查';
       const next=task.state.phase==='paused'?'已暂停，恢复后继续':!task.state.active?'任务未运行':task.nextPollAt?`预计 ${new Date(task.nextPollAt*1000).toLocaleTimeString()} 再检查（排队可能延后）`:'正在检查或等待账号请求队列';
       timing.textContent=`最近检查：${last} · ${next}`;
@@ -861,6 +883,10 @@ function renderTaskModules(){
       card.insertBefore(latest,card.querySelector('details'));
     });
   }
+  $$('#task-list > .task-card').forEach((card,index)=>{
+    const task=tasks[index];if(!task)return;
+    card.querySelector('.task-timing').textContent=`最近成功读取：${task.lastPollAt?new Date(task.lastPollAt*1000).toLocaleTimeString():'尚未完成'} · ${WorkbenchInsights.taskStatus(task).next}`;
+  });
   const tests=state.server.selftests;
   if(tests){
     const key=JSON.stringify(tests);
@@ -877,7 +903,7 @@ function renderCatalog(catalog) {
   catalog=browseCatalog(catalog);
   fillMissingCourseFields(catalog);
   const signature = JSON.stringify([originalCatalog, state.draft.courses, state.query, state.library.filename,
-    state.library.modifiedAt,state.library.loading,state.library.error]);
+    state.library.modifiedAt,state.library.loading,state.library.error,state.server.control.export?.status]);
   if (renderCatalog.signature === signature) return;
   renderCatalog.signature = signature;
   syncQueryControls(catalog.available);
@@ -899,8 +925,14 @@ function renderCatalog(catalog) {
   CoursePlanner.render(catalog,state.draft,state.preview);
   $('#catalog-count').textContent = `找到 ${matches.length} / ${catalog.available.length} 条课程记录`;
   const lib=state.library;
+  let health=$('#query-health');
+  if(!health){health=document.createElement('p');health.id='query-health';health.className='data-health';health.setAttribute('role','status');$('#catalog-note').after(health);}
+  const refreshFailed=state.server.control.export?.status==='failed';
+  health.textContent=state.query.source==='library'
+    ? `${lib.error?'本次重载失败；'+(lib.courses.length?'仍显示上次成功载入的数据。':'当前没有可用数据。'):refreshFailed?'最近同步失败，当前仍是旧快照。':''}查询时间见课程卡片；文件更新时间不等于查询时间。学期未提供时不推断。`
+    : WorkbenchInsights.freshness(catalog.updatedAt);
   $('#catalog-note').textContent=state.query.source==='library'
-    ? lib.error || (lib.loading?'正在载入本地课程库…':lib.filename?`课程库快照 · ${lib.complete?'已完成分类查询':'部分结果，尚不完整'} · ${lib.sourceRows} 条原始记录 · ${new Date(lib.modifiedAt*1000).toLocaleString()}${lib.missingTypes?` · ${lib.missingTypes} 条缺少查询入口，重新更新课程库后才能按类型筛选`:''}。余量非实时；查询不会访问学校。`:'尚未建立本地课程库。展开“更新课程库”，登录后同步一次，之后即可在本地查询。')
+    ? lib.error || (lib.loading?'正在载入本地课程库…':lib.filename?`课程库快照 · ${lib.complete?'已完成分类查询':'部分结果，尚不完整'} · ${lib.sourceRows} 条原始记录 · 文件更新时间 ${new Date(lib.modifiedAt*1000).toLocaleString()}${lib.missingTypes?` · ${lib.missingTypes} 条缺少查询入口，重新更新课程库后才能按类型筛选`:''}。余量非实时；查询不会访问学校。`:'尚未建立本地课程库。展开“更新课程库”，登录后同步一次，之后即可在本地查询。')
     : `${catalog.note} ${catalog.updatedAt ? '· 最近读取 ' + new Date(catalog.updatedAt * 1000).toLocaleString() : ''}`;
   if(state.query.source==='library' && catalog.updatedAt)$('#catalog-note').textContent+=` 已选课表对照：${new Date(catalog.updatedAt*1000).toLocaleString()}${catalog.note?.includes('历史缓存')?'（历史缓存，建议刷新）':''}。`;
   $('#enrolled-courses').innerHTML = catalog.results.length ? catalog.results.map(table =>
@@ -917,6 +949,14 @@ function renderCatalog(catalog) {
     return `<article class="event-row catalog-card ${exists ? 'is-selected' : ''}"><div><p class="course-type">${escapeHtml(CourseQuery.types(course).join(' / '))}</p><strong>${escapeHtml(course.name)}</strong><p>${escapeHtml(course.courseCode||'课程号未提供')} · ${escapeHtml(course.school||'院系未提供')} · 班号 ${escapeHtml(course.classNo??'未提供')}</p><p>${escapeHtml(course.teacher||'教师未提供')} · ${course.credits??'—'} 学分 · 面向 ${escapeHtml(course.year||'年级未提供')}</p><p class="course-time">${escapeHtml(course.schedule?.raw||'上课时间未提供')}</p><span class="quota ${course.remaining > 0 ? 'has-seats' : ''}">${course.remaining==null?'余量未知':course.remaining > 0 ? `快照余量 ${escapeHtml(course.remaining)} / ${escapeHtml(course.quota)}` : '已满 · 可加入等待'}</span><span class="course-meta"> · P/NP：${escapeHtml(course.pnp||'未提供')}</span>${conflictNote}<details data-course-detail="${index}"><summary>查看全部原始信息</summary><dl class="course-fields">${Object.entries(rawFields).map(([k,v])=>`<div><dt>${escapeHtml(k)}</dt><dd>${escapeHtml(v||'未提供')}</dd></div>`).join('')}</dl></details></div><div class="panel-actions"><button class="button ghost" data-preview-course="${index}" aria-label="${escapeAttr('预览课表：'+course.name)}">预览课表</button><button class="button secondary" data-add-catalog="${index}" ${canAdd?'':'disabled title="课程字段不完整，不能创建任务"'} aria-pressed="${exists}" aria-label="${escapeAttr((exists ? '移出本地计划：' : '加入计划：') + course.name + '，班号 ' + course.classNo)}">${exists ? '✓ 已加入 · 移出' : '+ 加入课程篮'}</button></div></article>`;
   }).join('') : catalog.available.length?'没有符合全部条件的课程。试试减少条件或点击“清空筛选”；不会自动隐藏缺少时间的课程。':'当前范围暂无课程。可以更新课程库，或切换到“已读取选课页”。';
   $$('[data-course-detail]').forEach(el=>{el.open=openDetails.has(el.dataset.courseDetail);});
+  $$('#available-courses > .catalog-card').forEach((card,index)=>{
+    const trust=WorkbenchInsights.courseTrust(visible[index].course,state.query.source==='current'?catalog:{});
+    const note=document.createElement('div');note.className='course-trust';
+    const status=document.createElement('strong');status.textContent=`上课时间：${trust.schedule}`;
+    const source=document.createElement('p');source.textContent=`学期：${trust.term} · 查询时间：${trust.queriedAt}`;
+    const age=document.createElement('p');age.textContent=WorkbenchInsights.freshness(trust.timestamp);
+    note.append(status,source,age);card.querySelector('.course-time').after(note);
+  });
   $$('[data-add-catalog]').forEach(button => button.addEventListener('click', () => {
     const course = catalog.available[Number(button.dataset.addCatalog)];
     const existing = state.draft.courses.findIndex(c => c.name === course.name && Number(c.classNo) === Number(course.classNo) && c.school === course.school);

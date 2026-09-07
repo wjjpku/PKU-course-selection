@@ -351,10 +351,13 @@ def create_task():
 
 @monitor.route('/api/tasks/<tid>', methods=['POST'])
 def task_action(tid):
+    from .tasks import ConfigConflict
     try:
         data=request.get_json() or {}
-        manager.command(tid,data.get('action'),data.get('plan'))
+        manager.command(tid,data.get('action'),data.get('plan'),data.get('configRevision'))
         return jsonify(ok=True)
+    except ConfigConflict as exc:
+        return jsonify(error=str(exc)), 409
     except (ValueError, TypeError, KeyError, AttributeError) as exc:
         return jsonify(error=str(exc)), 400
 
