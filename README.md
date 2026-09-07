@@ -13,11 +13,11 @@
 ```sh
 python3.12 -m venv .venv-ocr
 .venv-ocr/bin/pip install -r requirements-local.txt
-cp -n skj包/config.sample.ini skj包/config.ini
-.venv-ocr/bin/python skj包/main.py
+cp -n app/config.sample.ini app/config.ini
+.venv-ocr/bin/python app/main.py
 ```
 
-上面的复制配置步骤**仅用于首次安装**，已有配置时跳过，避免覆盖账号和任务设置。更新前先停止任务，保留 `skj包/config.ini` 与 `skj包/data/`，再安装依赖并重启。
+上面的复制配置步骤**仅用于首次安装**，已有配置时跳过，避免覆盖账号和任务设置。更新前先停止任务，保留 `app/config.ini` 与 `app/data/`，再安装依赖并重启。
 
 Windows 可将虚拟环境命令改为 `.venv-ocr\Scripts\python.exe`，安装依赖使用 `.venv-ocr\Scripts\python.exe -m pip install -r requirements-local.txt`，首次复制配置使用 PowerShell 的 `Copy-Item`。macOS 后台服务入口不能用于 Windows。
 
@@ -25,8 +25,8 @@ Windows 可将虚拟环境命令改为 `.venv-ocr\Scripts\python.exe`，安装�
 
 ## 数据与安全
 
-- 账号保存在本机 `skj包/config.ini`，不会提交 Git。
-- 任务和最近日志保存在 `skj包/data/workbench.sqlite3`，不会上传；重启恢复任务但不自动选课。
+- 账号保存在本机 `app/config.ini`，不会提交 Git。
+- 任务和最近日志保存在 `app/data/workbench.sqlite3`，不会上传；重启恢复任务但不自动选课。
 - 登录 Cookie 不持久化。课程缓存不代表实时名额。
 - 请求串行，正常轮询间隔由用户设置；网络异常保留退避等待。
 - 不提供退课或自动换课操作。
@@ -44,7 +44,7 @@ CSV 的「课程类型」按学校查询入口定义（例如从专业课入口�
 
 全量导出专用请求间隔为 4 秒，与刷课间隔设置独立；单次最多 300 个请求。刷课任务运行时禁止开始全量查询。可随时停止；停止、访问限制、分页异常或请求失败均保留已读部分，但明确标为部分 CSV，绝不标为完整。
 
-生成的 CSV 存放在 `skj包/data/exports/`，不会提交 Git。可在页面下载最近一次结果，旧文件仍保存在该目录。UTF-8 BOM 编码兼容 Excel；若需要保留课程号的前导零，请通过 Excel「从文本/CSV」导入并将课程号列设为文本。为避免公式执行风险，以公式符号开头的单元格会加单引号。
+生成的 CSV 存放在 `app/data/exports/`，不会提交 Git。可在页面下载最近一次结果，旧文件仍保存在该目录。UTF-8 BOM 编码兼容 Excel；若需要保留课程号的前导零，请通过 Excel「从文本/CSV」导入并将课程号列设为文本。为避免公式执行风险，以公式符号开头的单元格会加单引号。
 
 ## 更方便地查询课程
 
@@ -70,7 +70,7 @@ CSV 的「课程类型」按学校查询入口定义（例如从专业课入口�
 
 ## 来源与许可
 
-本项目基于原 PKUAutoElective 系列代码扩展，保留 [原项目说明](skj包/README.md) 和 [MIT 许可证及原作者声明](skj包/LICENSE)。前端参考思路见 [来源说明](docs/frontend-sources.md)，未直接复制 PKU Art 用户脚本。
+本项目基于原 PKUAutoElective 系列代码扩展，保留 [原项目说明](app/README.md) 和 [MIT 许可证及原作者声明](app/LICENSE)。前端参考思路见 [来源说明](docs/frontend-sources.md)，未直接复制 PKU Art 用户脚本。
 
 ## 项目目录
 
@@ -82,7 +82,7 @@ pkuskj/
 ├── showcase/                与真实账号隔离的展示源码
 │   └── tests/               展示模拟器测试
 ├── releases/                已发布版本的说明
-├── skj包/                   现有应用目录（保留以兼容启动路径）
+├── app/                     应用源码、模型和测试
 │   ├── autoelective/        Python 后端
 │   ├── web/                 本地前端
 │   ├── test/                后端与前端回归、历史 OCR 样本
@@ -95,4 +95,4 @@ pkuskj/
 └── 启动工作台.command        macOS 启动入口，保持原位
 ```
 
-目录职责与维护约定见 [文档导航](docs/README.md)。本地配置、虚拟环境、机器专用服务文件及个人备份保留原位，不随目录整理移动或上传。
+目录职责与维护约定见 [文档导航](docs/README.md)。应用目录由旧名称迁移为 `app/`，内部本机配置和数据一同保留，仍不提交。虚拟环境、机器专用服务文件及个人备份不动。旧版本升级注意事项见 [路径迁移](docs/path-migration.md)。

@@ -36,6 +36,6 @@ sys.stdout = sys.stderr = Console()
 # Does not prevent screen lock/display sleep. Assertion ends when this PID exits.
 subprocess.Popen(['/usr/bin/caffeinate', '-i', '-s', '-w', str(os.getpid())],
                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-sys.path.insert(0, str(ROOT / 'skj包'))
-sys.argv = [str(ROOT / 'skj包/main.py')]
+sys.path.insert(0, str(ROOT / 'app'))
+sys.argv = [str(ROOT / 'app/main.py')]
 runpy.run_path(sys.argv[0], run_name='__main__')

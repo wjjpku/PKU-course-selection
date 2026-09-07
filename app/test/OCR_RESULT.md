@@ -12,7 +12,7 @@
 在工作区根目录复现：
 
 ```sh
-.venv-ocr/bin/python skj包/test/benchmark_ocr.py
+.venv-ocr/bin/python app/test/benchmark_ocr.py
 ```
 
 模型未更换。旧依赖 ddddocr 1.4.7 在本次安装源中不可用，因此采用

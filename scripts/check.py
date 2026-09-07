@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-PACKAGE = ROOT / 'skj包'
+PACKAGE = ROOT / 'app'
 
 
 def main():

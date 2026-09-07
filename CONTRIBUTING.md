@@ -6,15 +6,15 @@
 
 ## 代码入口
 
-目录分工见 [文档导航](docs/README.md)。应用测试继续放在 `skj包/test/`；展示测试放在 `showcase/tests/`；构建与检查脚本放在 `scripts/`；生成物放在被忽略的 `output/`。不要为了目录命名而移动运行中的数据或服务入口。
+目录分工见 [文档导航](docs/README.md)。应用测试继续放在 `app/test/`；展示测试放在 `showcase/tests/`；构建与检查脚本放在 `scripts/`；生成物放在被忽略的 `output/`。不要为了目录命名而移动运行中的数据或服务入口。
 
-- `skj包/web/course-query.js`：纯本地筛选、字段选项、CSV 导出；可直接用 Node.js 测试。
-- `skj包/web/course-planner.js`：纯时间对照与冲突说明，不发选课请求。
-- `skj包/web/workbench-insights.js`：数据可信度与任务状态说明。
-- `skj包/web/app.js`、`planner.css`：查询卡片、课程篮及任务操作。
-- `skj包/autoelective/course_library.py`：从当前账号导出的 CSV 读取课程库，不访问学校。
-- `skj包/autoelective/course_export.py`：受限的只读课程查询、分页与原始 CSV。
-- `skj包/autoelective/control.py`、`tasks.py`：账号会话及独立任务。修改这里需要特别检查运行安全边界。
+- `app/web/course-query.js`：纯本地筛选、字段选项、CSV 导出；可直接用 Node.js 测试。
+- `app/web/course-planner.js`：纯时间对照与冲突说明，不发选课请求。
+- `app/web/workbench-insights.js`：数据可信度与任务状态说明。
+- `app/web/app.js`、`planner.css`：查询卡片、课程篮及任务操作。
+- `app/autoelective/course_library.py`：从当前账号导出的 CSV 读取课程库，不访问学校。
+- `app/autoelective/course_export.py`：受限的只读课程查询、分页与原始 CSV。
+- `app/autoelective/control.py`、`tasks.py`：账号会话及独立任务。修改这里需要特别检查运行安全边界。
 
 ## 提交前检查
 
