@@ -1,0 +1,12 @@
+# Local credentials and runtime data
+config.ini
+cache/
+log/
+figure/
+user_agents.user.txt
+
+# Python and editor artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.DS_Store

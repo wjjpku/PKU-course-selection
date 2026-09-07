@@ -1,0 +1,62 @@
+/* Original workbench styles; no external stylesheet or userscript injection. */
+:root { --paper:#f5f6f8; --surface:#fff; --line:#e3e6eb; --ink:#242832; --muted:#697182; --brand:#9b2242; --brand-dark:#751d37; }
+body { background:var(--paper); }
+main { width:min(1480px,calc(100% - 40px)); }
+.topbar { background:var(--surface); color:var(--ink); border-bottom:1px solid var(--line); }
+.topbar h1 { font-family:inherit; font-size:21px; }
+.topbar .eyebrow,.connection { color:var(--muted); }
+.brand-mark { color:var(--brand); border-color:var(--brand); }
+.main-menu { background:var(--paper); }
+.planner-layout { display:grid; grid-template-columns:minmax(310px, .85fr) minmax(0,1.15fr); gap:24px; align-items:start; }
+.course-browser { min-width:0; }
+.timetable-panel { min-width:0; padding:18px; border:1px solid var(--line); border-radius:12px; background:var(--paper); }
+.planner-layout #available-courses { grid-template-columns:1fr; max-height:820px; }
+.catalog-card > .panel-actions { justify-content:flex-end; margin-top:0; }
+.timetable-scroll { overflow:auto; max-height:660px; border:1px solid var(--line); border-radius:8px; background:var(--surface); }
+.timetable { width:100%; min-width:510px; border-collapse:collapse; table-layout:fixed; }
+.timetable th,.timetable td { border:1px solid var(--line); vertical-align:top; padding:3px; height:43px; font-size:11px; }
+.timetable th { color:var(--muted); background:var(--surface); font-weight:500; }
+.timetable thead th { position:sticky; top:0; z-index:1; height:30px; }
+.timetable th:first-child { width:28px; }
+.schedule-entry { display:block; border-radius:4px; padding:4px; margin:2px 0; overflow-wrap:anywhere; line-height:1.4; }
+.schedule-entry.enrolled,.schedule-legend .enrolled { background:#e2f0e8; color:#255941; }
+.schedule-entry.draft,.schedule-legend .draft { background:#e5edff; color:#284b85; }
+.schedule-entry.preview,.schedule-legend .preview { background:#fff0d1; color:#795716; border:1px dashed #b48428; }
+.schedule-legend { display:flex; gap:10px; font-size:12px; }
+.schedule-legend span { border-radius:4px; padding:5px 10px; }
+.conflict-badge { font-size:11px; color:var(--muted); line-height:1.8; }
+.conflict-badge.conflict { color:#a32238; font-weight:650; }
+#planner-warnings { padding-left:18px; font-size:12px; color:var(--muted); line-height:1.8; max-height:160px; overflow:auto; }
+.timetable-panel select { width:auto; }
+#basket-summary { font-size:13px; font-weight:600; }
+:root[data-theme="dark"] { color-scheme:dark; --paper:#171a21; --surface:#212630; --line:#3b4351; --ink:#e8eaf0; --muted:#b4bdcc; --brand:#e39aac; --brand-dark:#73253e; }
+[data-theme="dark"] .panel,[data-theme="dark"] .next-action-bar,[data-theme="dark"] .dialog { background:var(--surface); color:var(--ink); }
+[data-theme="dark"] input,[data-theme="dark"] select,[data-theme="dark"] .button.secondary,[data-theme="dark"] .button.ghost { background:var(--surface); color:var(--ink); border-color:var(--line); }
+[data-theme="dark"] .button.primary { background:#952e4d; color:white; }
+[data-theme="dark"] .catalog-card.is-selected { background:#263b31; border-color:#698772; }
+[data-theme="dark"] .global-error,[data-theme="dark"] #save-feedback:not(:empty) { background:#393025; }
+[data-theme="dark"] .conflict-badge.conflict { color:#ffa4b1; }
+@media(max-width:1000px) { .planner-layout { grid-template-columns:1fr; } .planner-layout #available-courses { max-height:520px; } }
+@media(max-width:560px) { main { width:calc(100% - 24px); } .timetable-panel { padding:10px; } #theme-toggle { font-size:12px; padding:8px; } .planner-layout { gap:16px; } }
+
+/* Browse first; open the timetable only when comparing a course. */
+.poll-history { margin-top:16px; border-top:1px solid var(--line); padding-top:12px; }
+.poll-history h4 { margin:0; }
+.poll-history pre { max-height:320px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; padding:12px; background:var(--paper); border-radius:8px; line-height:1.7; }
+.planner-layout { grid-template-columns:minmax(0,1.2fr) minmax(0,1fr); gap:20px; }
+.planner-layout.list-only { grid-template-columns:minmax(0,1fr); }
+.planner-layout.list-only #available-courses { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.planner-layout #available-courses { max-height:none; overflow:visible; padding:0; }
+.catalog-filters { display:flex; align-items:center; flex-wrap:wrap; gap:12px; margin:12px 0; }
+.catalog-filters label { display:flex; align-items:center; gap:6px; font-size:13px; color:var(--muted); }
+.catalog-filters select { width:auto; padding:9px; border:1px solid var(--line); border-radius:8px; background:var(--surface); color:var(--ink); }
+.catalog-filters a { text-decoration:none; }
+.basket-strip { padding:12px 14px; background:var(--paper); border-radius:8px; color:var(--muted); font-size:13px; line-height:1.7; overflow-wrap:anywhere; }
+.catalog-card .panel-actions { margin-top:auto; padding-top:8px; border-top:1px solid var(--line); }
+.timetable-panel .panel-heading { margin-bottom:12px; padding-bottom:12px; }
+.next-action-bar { position:static; transform:none; width:100%; box-sizing:border-box; margin:16px 0; box-shadow:none; background:var(--surface); }
+#view-plan { scroll-margin-top:16px; }
+#view-plan .workspace-grid { grid-template-columns:minmax(0,1fr); }
+#view-plan .compact-panel { display:none; }
+@media(max-width:1000px) { .planner-layout { grid-template-columns:minmax(0,1fr); } }
+@media(max-width:640px) { .planner-layout.list-only #available-courses { grid-template-columns:minmax(0,1fr); } .catalog-tools input { min-width:0; width:100%; flex-basis:100%; } .catalog-filters { gap:8px; } .next-action-bar { align-items:stretch; flex-direction:column; } }

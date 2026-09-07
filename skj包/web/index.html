@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#7a1538" />
+    <link rel="icon" href="data:," />
+    <title>燕园选课工作台</title>
+    <link rel="stylesheet" href="/assets/styles.css" />
+    <link rel="stylesheet" href="/assets/planner.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand-mark" aria-hidden="true">北大</div>
+      <div>
+        <p class="eyebrow">选课计划工作台</p>
+        <h1>燕园选课助手</h1>
+      </div>
+      <div class="connection" id="connection"><span class="status-dot"></span>本地服务已连接</div>
+      <button class="button secondary" id="theme-toggle" aria-label="切换深浅主题">深色模式</button>
+    </header>
+
+    <main>
+      <nav id="main-menu" class="main-menu" aria-label="主目录" hidden><button class="button primary" data-directory="select">选课</button><button class="button secondary" data-directory="run">刷课 <span id="run-target-count">0</span></button><button id="account-exit" class="button ghost">退出登录</button></nav>
+      <section id="select-workspace" hidden></section>
+      <section id="debug-workspace" hidden><article class="panel"><div class="panel-heading"><h2>系统调试 · 离线自检</h2><button class="button primary" data-test="all">一键自检</button></div><p>独立进程，禁止网络；不改真实配置，不控制运行任务。测试可能短暂占用本机 CPU。</p><div id="selftest-list"></div></article></section>
+      <section id="run-workspace" hidden></section>
+      <section class="stage-banner" aria-labelledby="stage-title">
+        <div>
+          <p class="eyebrow">任务状态</p>
+          <h2 id="stage-title">准备期 · 网络轮询已锁定</h2>
+          <p>先读取课程，再点选你想要的课。保存后由你明确启动；不会自动退课。</p>
+        </div>
+        <div class="stage-actions">
+          <span id="control-hint">正在读取任务状态</span>
+          <div class="panel-actions">
+            <button class="button primary" type="button" data-command="start">开始运行</button>
+            <button class="button secondary" type="button" data-command="pause">暂停</button>
+            <button class="button secondary" type="button" data-command="resume">继续</button>
+            <button class="button secondary" type="button" data-command="stop">停止</button>
+          </div>
+        </div>
+      </section>
+      <p id="control-error" role="alert" class="form-error global-error"></p>
+      <nav class="workflow" aria-label="操作步骤"><a href="#catalog-panel">1　读取并选课</a><a href="#view-plan">2　确认目标并保存</a><a href="#stage-title">3　启动与查看状态</a></nav>
+
+      <section class="metrics" aria-label="计划摘要">
+        <article><span>目标课程</span><strong id="course-count">—</strong><small>按优先级排列</small></article>
+        <article><span>配置检查</span><strong id="issue-count">—</strong><small>等待读取</small></article>
+        <article><span>最低间隔</span><strong id="min-interval">—</strong><small>按任务设置</small></article>
+        <article><span>运行会话</span><strong>1</strong><small>页面控制使用单会话顺序执行</small></article>
+      </section>
+
+      <details class="panel" id="account-panel">
+        <summary>登录选课助手 <span id="account-status">正在读取</span></summary>
+        <p>登录后进入选课目录，点选课程加入刷课栏。账号已保存在本机时，可以直接进入。</p>
+        <form id="account-form" class="form-grid" autocomplete="off">
+          <label><span>学号</span><input id="account-id" placeholder="留空保留已保存学号" autocomplete="username" /></label>
+          <label><span>密码</span><input id="account-password" type="password" placeholder="留空保留已保存密码" autocomplete="new-password" /></label>
+          <label><span>登录需选择主修/辅双</span><select id="account-dual"><option value="false">否</option><option value="true">是</option></select></label>
+          <label><span>身份</span><select id="account-identity"><option value="bzx">主修</option><option value="bfx">辅双</option></select></label>
+        </form>
+        <div class="panel-actions"><button class="button primary" id="login-enter">登录并读取课程</button><button class="button ghost" id="persist-account" hidden>保存账号</button><button class="button ghost" data-command="login" hidden>登录检查</button><button class="button ghost" data-command="logout" hidden>退出会话</button><button class="button secondary" data-command="ocr-test">测试本地验证码</button></div>
+        <p class="course-meta">账号保存在本机配置文件，密码不回显。退出会话清除本地 Cookie。暂停与停止在当前请求结束后生效。</p>
+      </details>
+      <section class="panel event-panel" id="catalog-panel"><div class="panel-heading"><div><p class="eyebrow">第一步</p><h2>选择想要的课程</h2></div><button class="button secondary" data-command="read-courses">读取 / 刷新课程</button></div><p id="catalog-note">点击读取后显示学校课程，仅查询，不提交选课。</p><details class="enrolled-details"><summary>查看我的已选课程 <span id="enrolled-count"></span></summary><div id="enrolled-courses">尚未读取</div></details><div class="catalog-tools"><label for="course-search">搜索当前列表</label><input id="course-search" type="search" placeholder="课程名称 / 开课单位 / 班号" /><span id="catalog-count" role="status"></span></div><p class="course-meta">满员课程也可以加入计划等待空位。搜索只覆盖已读取页；点击加入不会立即选课。</p><div id="available-courses"></div></section>
+      <section class="panel event-panel"><div class="panel-heading"><h2>实时运行</h2><span id="live-timing"></span></div><div id="live-courses"></div><p id="live-captcha"></p></section>
+      <nav class="view-tabs" aria-label="工作台视图">
+        <button class="tab is-active" type="button" data-view="plan" aria-selected="true">课程计划</button>
+        <button class="tab" type="button" data-view="rules" aria-selected="false">高级设置</button>
+        <button class="tab" type="button" data-view="diagnostics" aria-selected="false">运行检查</button>
+      </nav>
+
+      <section id="view-plan" class="app-view is-active">
+        <div class="workspace-grid">
+          <article class="panel panel-wide">
+            <div class="panel-heading">
+              <div><p class="eyebrow">第二步</p><h2>我的目标课程</h2></div>
+              <div class="panel-actions">
+                <span class="badge" id="save-badge">正在检查保存状态</span>
+                <button class="button primary" id="persist-plan" type="button">保存并应用</button>
+                <button class="button primary" id="pick-course" type="button">从学校课程中选择</button>
+                <button class="button ghost" id="add-course" type="button">手动添加（高级）</button>
+              </div>
+            </div>
+            <p id="save-feedback" role="status" aria-live="polite"></p>
+            <p id="effective-plan" class="course-meta"></p>
+            <div id="course-list" class="empty-state">正在读取课程计划…</div>
+            <div class="panel-footer">
+              <span id="draft-status">尚未修改</span>
+              <div class="panel-actions">
+                <button class="button ghost" id="reset-draft" type="button">恢复当前配置</button>
+                <button class="button secondary" id="export-plan" type="button">导出安全配置</button>
+              </div>
+            </div>
+          </article>
+
+          <aside class="panel compact-panel">
+            <div class="panel-heading"><div><p class="eyebrow">执行逻辑</p><h2>优先级</h2></div></div>
+            <ol class="step-list">
+              <li><strong>从上到下检查</strong><span>同一轮有多门可选时，靠前的课程先提交。</span></li>
+              <li><strong>应用互斥组</strong><span>组内选中一门后，同组其他课程会停止尝试。</span></li>
+              <li><strong>检查名额阈值</strong><span>如果设置阈值，剩余名额小于等于它时才尝试。</span></li>
+            </ol>
+          </aside>
+        </div>
+      </section>
+
+      <section id="view-rules" class="app-view" hidden>
+        <div class="workspace-grid equal-grid">
+          <article class="panel">
+            <div class="panel-heading"><div><p class="eyebrow">请求策略</p><h2>频率与会话</h2></div></div>
+            <form id="client-form" class="form-grid">
+              <label><span>课程所在页</span><input name="page" id="course-page" type="number" min="1" /></label>
+              <label><span>登录超时（秒）</span><input name="loginTimeout" id="login-timeout" type="number" min="1" /></label>
+              <label><span>选课请求超时（秒）</span><input name="requestTimeout" id="request-timeout" type="number" min="1" /></label>
+              <label>
+                <span>基础间隔</span>
+                <span class="input-with-unit"><input id="refresh-interval" name="refreshInterval" type="number" min="0" step="any" /><em>秒</em></span>
+                <small>请求完成后的基础等待时间。</small>
+              </label>
+              <label>
+                <span>随机偏移</span>
+                <span class="input-with-unit"><input id="random-deviation" name="randomDeviation" type="number" min="0" max="0.5" step="0.05" /><em>比例</em></span>
+                <small>例如 0.2 表示上下浮动 20%。</small>
+              </label>
+              <label>
+                <span>旧命令行会话池大小</span>
+                <span class="input-with-unit"><input id="pool-size-input" name="poolSize" type="number" min="1" max="5" step="1" /><em>个</em></span>
+                <small>此项仅供旧命令行使用；页面任务使用单会话。</small>
+              </label>
+              <label>
+                <span>会话存活时间</span>
+                <span class="input-with-unit"><input id="max-life" name="maxLife" type="number" min="60" step="60" /><em>秒</em></span>
+                <small>到期后主动重新登录。</small>
+              </label>
+            </form>
+            <div class="policy-result" id="policy-result" aria-live="polite"></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-heading">
+              <div><p class="eyebrow">课程关系</p><h2>互斥组</h2></div>
+              <button class="button secondary" id="add-mutex" type="button">+  添加互斥组</button>
+            </div>
+            <div id="mutex-list" class="rule-list"></div>
+          </article>
+        </div>
+      </section>
+
+      <section id="view-diagnostics" class="app-view" hidden>
+        <div class="workspace-grid equal-grid">
+          <article class="panel">
+            <div class="panel-heading"><div><p class="eyebrow">就绪度</p><h2>安全检查</h2></div><strong class="score" id="readiness-score">—</strong></div>
+            <div id="issue-list" class="check-list" aria-live="polite">正在执行本地检查…</div>
+          </article>
+          <article class="panel">
+            <div class="panel-heading"><div><p class="eyebrow">本地环境</p><h2>组件状态</h2></div></div>
+            <dl class="diagnostic-list" id="diagnostic-list"></dl>
+          </article>
+        </div>
+        <article class="panel event-panel">
+          <div class="panel-heading"><div><p class="eyebrow">状态流</p><h2>运行记录</h2></div><button id="export-events" class="button secondary">导出运行记录</button></div>
+          <div id="event-list" class="event-list"></div>
+        </article>
+      </section>
+    </main>
+
+    <aside class="next-action-bar" aria-label="下一步"><div><strong id="journey-title">正在连接工作台</strong><p id="journey-hint">稍候读取本地状态，不会自动登录学校。</p></div><button id="journey-next" class="button primary" disabled>请稍候</button></aside>
+
+    <dialog id="start-dialog" class="dialog" aria-labelledby="start-title">
+      <form method="dialog">
+        <div class="dialog-heading"><h2 id="start-title">确认本次运行目标</h2></div>
+        <div class="dialog-form"><p>下面是已保存的目标。确认后会登录学校并尝试补选；不会退课。</p><ul id="start-targets"></ul><p id="start-policy"></p><p class="course-meta">课程能否选上仍由学校的名额、资格和开放时段决定。</p></div>
+        <div class="dialog-actions"><button class="button ghost" value="cancel">返回检查</button><button id="confirm-start" class="button primary" type="button">确认并开始补选</button></div>
+      </form>
+    </dialog>
+    <dialog id="course-dialog" class="dialog">
+      <form method="dialog" id="course-form">
+        <div class="dialog-heading"><div><p class="eyebrow">课程计划</p><h2 id="course-dialog-title">添加课程</h2></div><button class="icon-button" value="cancel" aria-label="关闭" type="submit" formnovalidate>×</button></div>
+        <input id="editing-index" type="hidden" />
+        <div class="form-grid dialog-form">
+          <label><span>课程标识</span><input id="course-id" required maxlength="32" pattern="[A-Za-z0-9_-]+" placeholder="例如 math_1" /><small>仅允许字母、数字、下划线和连字符。</small></label>
+          <label><span>课程名称</span><input id="course-name" required maxlength="80" placeholder="请与选课网完全一致" /></label>
+          <label><span>班号</span><input id="course-class" required type="number" min="0" step="1" /></label>
+          <label><span>开课单位</span><input id="course-school" required maxlength="80" /></label>
+          <label class="full-field"><span>剩余名额阈值（可选）</span><input id="course-threshold" type="number" min="1" step="1" placeholder="不设置则有空位时立即尝试" /></label>
+        </div>
+        <p class="form-error" id="course-form-error" role="alert"></p>
+        <div class="dialog-actions"><button class="button ghost" value="cancel" type="submit" formnovalidate>取消</button><button class="button primary" id="save-course" value="default" type="button">保存课程</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="mutex-dialog" class="dialog">
+      <form method="dialog" id="mutex-form">
+        <div class="dialog-heading"><div><p class="eyebrow">选中其一</p><h2>添加互斥组</h2></div><button class="icon-button" value="cancel" aria-label="关闭" type="submit" formnovalidate>×</button></div>
+        <div id="mutex-options" class="checkbox-list"></div>
+        <p class="form-error" id="mutex-form-error" role="alert"></p>
+        <div class="dialog-actions"><button class="button ghost" value="cancel" type="submit" formnovalidate>取消</button><button class="button primary" id="save-mutex" value="default" type="button">保存互斥组</button></div>
+      </form>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script src="/assets/course-planner.js" defer></script>
+    <script src="/assets/app.js" defer></script>
+  </body>
+</html>

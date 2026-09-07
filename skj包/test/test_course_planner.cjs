@@ -1,0 +1,14 @@
+const assert=require('node:assert/strict');
+const P=require('../web/course-planner.js');
+const course=(name,weeks,day=1,start=1,end=2)=>({name,school:'学院',classNo:1,schedule:{teachingKnown:true,sessions:[{weeks,day,start,end}],exam:null}});
+const a=course('甲',[1,3,5]);
+assert.equal(P.compare(a,course('乙',[2,4,6])).teaching,false);
+assert.equal(P.compare(a,course('乙',[3,4])).teaching,true);
+assert.equal(P.compare(a,course('乙',[3],2)).teaching,false);
+assert.equal(P.compare(a,course('乙',[3],1,3,4)).teaching,false);
+assert.equal(P.assess({name:'未知'},[a]).unknown,true);
+const b=course('乙',[2]);a.schedule.exam={date:'20270104',period:'上午'};b.schedule.exam={...a.schedule.exam};
+assert.equal(P.compare(a,b).exam,true);
+assert.equal(P.compare(a,a).teaching,false);
+assert.equal(P.compare({...a,courseCode:'001'}, {...a,courseCode:'002'}).teaching,true);
+console.log('Course planner conflict checks passed');

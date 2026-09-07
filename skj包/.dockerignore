@@ -1,0 +1,9 @@
+config.ini
+cache
+log
+figure
+test
+__pycache__
+*.pyc
+.git
+.DS_Store
