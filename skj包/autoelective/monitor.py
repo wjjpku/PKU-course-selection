@@ -203,9 +203,11 @@ def _api_overview():
 def control_action():
     try:
         data = request.get_json() or {}
-        if manager.active() and data.get('action') in ('start','login','read-courses','logout'):
+        if manager.active() and data.get('action') in ('start','login','read-courses','logout','export-courses'):
             return jsonify(error='请先停止刷课任务，再操作账号或读取课程，以免影响运行会话'), 409
-        with controller.lock:
+        with manager.lock, controller.lock:
+            if data.get('action') == 'export-courses' and manager.active():
+                return jsonify(error='请先停止刷课任务再全量查询'), 409
             if data.get('action') == 'start' and data.get('configRevision') != config_revision():
                 return jsonify(error='配置已变化或页面版本过旧，请刷新并核对已生效配置后再启动'), 409
             controller.command(data.get('action'))
@@ -214,9 +216,37 @@ def control_action():
         return jsonify(error=str(exc)), 400
 
 
+@monitor.route('/api/course-export/download', methods=['GET'])
+def download_course_export():
+    from pathlib import Path
+    filename = controller.export.get('filename')
+    if not filename or controller.export.get('status') == 'running':
+        return jsonify(error='尚无可下载的查询结果'), 404
+    return send_from_directory(Path(__file__).resolve().parents[1] / 'data/exports', filename,
+                               as_attachment=True, download_name=filename, mimetype='text/csv; charset=utf-8')
+
+
+@monitor.route('/api/course-library', methods=['GET'])
+def course_library():
+    from .course_library import read_library
+    # Read only the current account's saved export, never enumerate other files.
+    if manager.store and manager.store.account_key != manager.store.account():
+        return jsonify(error='账号已切换，请重启后端后载入该账号的课程库'), 409
+    metadata = manager.store.load_library_export() if manager.store else controller.export
+    try:
+        result = read_library(metadata)
+        result['accountScope'] = manager.store.account() if manager.store else hashlib.sha256(
+            (config.iaaa_id + ':' + config.identity).encode()).hexdigest()
+        return jsonify(result)
+    except FileNotFoundError:
+        return jsonify(error='已导出的课程库文件不存在，请重新查询'), 404
+    except (ValueError, OSError) as exc:
+        return jsonify(error='无法读取课程库：' + (str(exc) if isinstance(exc, ValueError) else '文件读取失败')), 400
+
+
 @monitor.route('/api/config', methods=['POST'])
 def save_configuration():
-    with controller.lock:
+    with manager.lock, controller.lock:
         if controller.active() or manager.active():
             return jsonify(error='请先停止任务，再保存配置'), 409
         previous = config._config
@@ -379,6 +409,10 @@ def run_monitor():
         controller.catalog = cached
         controller.catalog['note'] = '数据库历史缓存，非实时结果；登录后可重新读取课程'
     controller.catalog_sink = manager.store.save_catalog
+    saved_export = manager.store.load_export()
+    if saved_export:
+        controller.export = saved_export
+    controller.export_sink = manager.store.save_export
     host = config.monitor_host
     if host not in ("127.0.0.1", "localhost", "::1"):
         cout.warning("Dashboard has no remote authentication; binding to 127.0.0.1 instead of %s", host)

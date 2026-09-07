@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname, '../web/app.js'), 'utf8').split('\nsetInterval(')[0];
-const context = vm.createContext({});
+const context = vm.createContext({CourseQuery:require('../web/course-query.js')});
 vm.runInContext(source, context);
 const plan = {
   courses: [{id:'sf',name:'',classNo:3}, {id:'chosen',name:'用户点选课程',school:'学院',classNo:1}],

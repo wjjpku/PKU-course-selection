@@ -31,6 +31,7 @@ class Controller:
         self.login_time = 0
         self.logout_requested = False
         self.catalog = dict(results=[], available=[], updatedAt=None, note='尚未读取', page=None)
+        self.export = dict(status='idle', pages=0, rows=0, message='尚未查询', filename=None)
 
     def active(self):
         return self.thread is not None and self.thread.is_alive()
@@ -52,7 +53,7 @@ class Controller:
         with self.lock:
             return dict(phase=self.phase, active=self.active(), loggedIn=self.logged_in,
                         failure=self.failure, courses=copy.deepcopy(list(self.rows.values())),
-                        captcha=copy.deepcopy(self.captcha), catalog=copy.deepcopy(self.catalog))
+                        captcha=copy.deepcopy(self.captcha), catalog=copy.deepcopy(self.catalog), export=copy.deepcopy(self.export))
 
     def log_round(self, env):
         """Report observed outcomes, never infer election success from a submission."""
@@ -85,7 +86,7 @@ class Controller:
                     if not self.active() and self.logout_requested:
                         self.close_session()
                 return
-            if action not in ('start', 'login', 'ocr-test', 'read-courses'):
+            if action not in ('start', 'login', 'ocr-test', 'read-courses', 'export-courses'):
                 raise ValueError('未知操作')
             if self.active():
                 raise ValueError('请先停止当前任务')
@@ -96,12 +97,14 @@ class Controller:
                     raise ValueError('；'.join(errors))
                 self.rows = {cid: dict(id=cid, name=c.name, status='等待登录', attempts=0)
                              for cid, c in cfg.courses.items()}
-            if action in ('login', 'start', 'read-courses') and (not cfg.iaaa_id or not cfg.iaaa_password):
+            if action in ('login', 'start', 'read-courses', 'export-courses') and (not cfg.iaaa_id or not cfg.iaaa_password):
                 raise ValueError('请先保存账号和密码')
             self.stop_event.clear()
             self.logout_requested = False
             self.resume_event.set()
             self.failure = None
+            if action == 'export-courses':
+                self.export = dict(status='running', pages=0, rows=0, message='准备登录查询', filename=None)
             self.phase = 'testing' if action == 'ocr-test' else 'starting'
             self.thread = threading.Thread(target=self.run, args=(action,), daemon=True)
             self.thread.start()
@@ -156,6 +159,12 @@ class Controller:
                 return
             if not self.logged_in or (cfg.elective_client_max_life > 0 and time.monotonic() - self.login_time >= cfg.elective_client_max_life):
                 self.login(cfg)
+            if action == 'export-courses':
+                from .course_export import export_courses
+                self.phase = 'reading'
+                export_courses(self, cfg)
+                self.phase = 'stopped' if self.export['status'] == 'cancelled' else 'ready'
+                return
             if action == 'read-courses':
                 self.read_courses(cfg)
                 self.phase = 'ready'
@@ -267,8 +276,12 @@ class Controller:
                     self.stop_event.wait(.1)
         except Cancelled:
             self.phase = 'stopped'
+            if action == 'export-courses' and self.export['status'] == 'running':
+                self.export.update(status='cancelled', message='查询已停止')
         except Exception as exc:
             self.failure = redact_sensitive(str(exc))
+            if action == 'export-courses':
+                self.export.update(status='failed', message=self.failure)
             self.phase = 'error'
             env.add_event('error', self.failure)
         finally:

@@ -5,6 +5,64 @@ const $$ = (selector) => [...document.querySelectorAll(selector)];
 const state = { server: null, draft: null, activeView: "plan", saving: false, connected: false };
 state.directory = 'select';
 state.preview = null;
+state.library = {courses:[],loaded:false,loading:false,error:'',filename:null};
+state.query = CourseQuery.defaults();
+state.queryScope = null;
+state.queryMatches = [];
+
+function saveQuery() {
+  if(!state.queryScope)return;
+  try {localStorage.setItem('pku-course-query-v1:'+state.queryScope,JSON.stringify(state.query));}
+  catch {$('#query-feedback').textContent='浏览器不允许保存筛选条件，本次查询仍可使用。';}
+}
+
+async function loadCourseLibrary(force=false) {
+  if(!state.server || state.library.loading)return;
+  const key=JSON.stringify([state.server.account,state.server.control.export?.filename]);
+  if(!force && state.library.loadKey===key)return;
+  const accountHint=JSON.stringify(state.server.account);
+  if(state.library.accountHint && state.library.accountHint!==accountHint)state.library={courses:[],loaded:false,filename:null};
+  state.library.accountHint=accountHint;
+  state.library.loading=true;state.library.loadKey=key;state.library.error='';
+  try {
+    const response=await fetch('/api/course-library',{cache:'no-store'});
+    if(!response.ok) {
+      const data=await response.json().catch(()=>({}));
+      throw Error(data.error || (response.status===404?'后端尚未提供课程库查询，请加载新版后端。':'课程库暂不可用，请重试。'));
+    }
+    const data=await response.json();
+    if(!Array.isArray(data.courses))throw Error('课程库返回格式不正确');
+    state.library={...data,loaded:true,loading:false,error:'',loadKey:key,accountHint};
+    if(state.queryScope!==data.accountScope) {
+      state.queryScope=data.accountScope;
+      try {state.query=CourseQuery.clean(JSON.parse(localStorage.getItem('pku-course-query-v1:'+state.queryScope)||'null'));}
+      catch {state.query=CourseQuery.defaults();}
+    }
+  } catch(error) {
+    state.library.loading=false;state.library.error=error.message;
+  }
+  renderCatalog(state.server.control.catalog);
+}
+
+function browseCatalog(catalog) {
+  return {...catalog,available:state.query.source==='library'?state.library.courses:catalog.available};
+}
+
+function syncQueryControls(courses) {
+  const f=state.query, facets=CourseQuery.facets(courses);
+  const options=(values,chosen,label)=>`<option value="">${label}</option>`+[...new Set([...values,...(chosen?[chosen]:[])])].map(v=>`<option value="${escapeAttr(v)}" ${v===chosen?'selected':''}>${escapeHtml(v)}${values.includes(v)?'':'（当前数据无此项）'}</option>`).join('');
+  $('#query-type').innerHTML=options(facets.types,f.type,'所有入口');
+  $('#query-credits').innerHTML=options(facets.credits,f.credits,'不限');
+  for(const [group,label] of [['departments','院系'],['years','面向年级']]) {
+    const values=[...new Set([...facets[group],...f[group]])];
+    $('#query-'+group).innerHTML=values.map(v=>`<label><input type="checkbox" data-query-group="${group}" value="${escapeAttr(v)}" ${f[group].includes(v)?'checked':''}>${escapeHtml(v)}</label>`).join('')||'<p>当前数据未提供选项</p>';
+    $('#query-'+group+'-summary').textContent=label+' · '+(f[group].length?f[group].join('、'):'不限');
+  }
+  $('#course-search').value=f.q;
+  $('#query-source').value=f.source;
+  $('#catalog-filter').value=f.availability;
+  $('#catalog-sort').value=f.sort;
+}
 
 function showDirectory(directory) {
   state.directory = directory;
@@ -414,6 +472,14 @@ function exportPlan() {
 }
 
 function bindEvents() {
+  $('#catalog-panel h2').textContent='课程查询';
+  $('#catalog-panel .eyebrow').textContent='先找课，再安排';
+  $('#catalog-panel [data-command="read-courses"]').textContent='刷新已选课表';
+  const exportPanel=document.createElement('details');exportPanel.className='query-sync';exportPanel.id='course-export-panel';
+  exportPanel.innerHTML='<summary>更新课程库 / 下载原始 CSV</summary><p class="course-meta">更新会只读查询学校当前账号可见的分类与分页，不包含大纲详情；每次请求至少间隔 4 秒（仅全量导出）。本地搜索无需登录或反复请求学校，加入课程篮不会立即选课。</p><div class="panel-actions"><button type="button" class="button secondary" id="export-courses-start">更新课程库</button><button type="button" class="button ghost" id="export-courses-stop" hidden>停止查询并保留部分结果</button><a class="button secondary" id="export-courses-download" href="/api/course-export/download" hidden>下载 CSV</a></div><p id="export-courses-status" role="status" aria-live="polite">尚未查询</p>';
+  $('#catalog-note').after(exportPanel);
+  $('#export-courses-start').addEventListener('click',async()=>{const b=$('#export-courses-start');b.disabled=true;try{await post('/api/control',{action:'export-courses'});await refreshStatus();}catch(e){reportError(e);}finally{renderControl();}});
+  $('#export-courses-stop').addEventListener('click',async()=>{try{await post('/api/control',{action:'stop'});await refreshStatus();}catch(e){reportError(e);}});
   const planner=document.createElement('div');planner.className='planner-layout';
   const browse=document.createElement('div');browse.className='course-browser';
   const tools=$('.catalog-tools');const note=tools.nextElementSibling;
@@ -421,27 +487,50 @@ function bindEvents() {
   const calendar=document.createElement('aside');calendar.className='timetable-panel';
   calendar.innerHTML='<div class="panel-heading"><h3>我的课表 · 对照预览</h3><label>教学周 <select id="preview-week" aria-label="预览教学周"></select></label></div><p class="course-meta">手动选择教学周，非自动当前周；冲突提示会检查所有已解析教学周。</p><p class="schedule-legend"><span class="enrolled">已选</span><span class="draft">课程篮</span><span class="preview">正在预览</span></p><p id="basket-summary"></p><p id="planner-preview" class="course-meta"></p><div class="timetable-scroll"><table class="timetable"><thead><tr><th>节</th><th>一</th><th>二</th><th>三</th><th>四</th><th>五</th><th>六</th><th>日</th></tr></thead><tbody id="timetable-body"></tbody></table></div><ul id="planner-warnings" aria-live="polite"></ul>';
   const filters=document.createElement('div');filters.className='catalog-filters';
-  filters.innerHTML='<label>显示 <select id="catalog-filter"><option value="all">全部课程</option><option value="seats">有余量</option><option value="basket">已加入课程篮</option></select></label><label>排序 <select id="catalog-sort"><option value="school">学校原顺序</option><option value="seats">余量从多到少</option><option value="name">课程名称</option></select></label><button type="button" class="button ghost" id="toggle-timetable" aria-expanded="false" aria-controls="course-calendar">展开课表</button><a class="button secondary" id="basket-link" href="#view-plan">查看课程篮</a>';
+  filters.innerHTML='<label>查询范围<select id="query-source"><option value="library">本地全量课程库</option><option value="current">已读取选课页</option></select></label><label>课程类型（查询入口）<select id="query-type"></select></label><label>学分<select id="query-credits"></select></label><details class="query-multi"><summary id="query-departments-summary">院系 · 不限</summary><div id="query-departments"></div></details><details class="query-multi"><summary id="query-years-summary">面向年级 · 不限</summary><div id="query-years"></div></details><label>显示 <select id="catalog-filter"><option value="all">全部课程</option><option value="seats">有余量（快照）</option><option value="basket">已加入课程篮</option></select></label><label>排序 <select id="catalog-sort"><option value="school">学校原顺序</option><option value="seats">余量从多到少</option><option value="name">课程名称</option><option value="credits">学分从多到少</option></select></label><button type="button" class="button ghost" id="query-reset">清空筛选</button>';
   browse.insertBefore(filters,browse.querySelector('#available-courses'));
+  const actions=document.createElement('div');actions.className='query-actions';
+  actions.innerHTML='<button type="button" class="button ghost" id="query-science">快捷：理科院系 · 4 学分 · 2025/2026 级</button><button type="button" class="button ghost" id="query-reload">重新载入本地数据</button><button type="button" class="button secondary" id="query-export">导出筛选结果</button><button type="button" class="button ghost" id="toggle-timetable" aria-expanded="false" aria-controls="course-calendar">展开课表</button><a class="button secondary" id="basket-link" href="#view-plan">查看课程篮</a><p id="query-feedback" role="status" aria-live="polite"></p>';
+  filters.after(actions);
+  const pagination=document.createElement('nav');pagination.className='query-pagination';pagination.setAttribute('aria-label','课程查询分页');
+  pagination.innerHTML='<button type="button" class="button ghost" id="query-prev">上一页</button><span id="query-page" role="status"></span><button type="button" class="button ghost" id="query-next">下一页</button>';
+  browse.append(pagination);
   const basketStrip=document.createElement('p');basketStrip.id='basket-strip';basketStrip.className='basket-strip';browse.insertBefore(basketStrip,browse.querySelector('#available-courses'));
   calendar.id='course-calendar';calendar.hidden=true;planner.classList.add('list-only');
   const toggleCalendar=(open)=>{calendar.hidden=!open;planner.classList.toggle('list-only',!open);$('#toggle-timetable').textContent=open?'收起课表':'展开课表';$('#toggle-timetable').setAttribute('aria-expanded',String(open));};
   planner.append(browse,calendar);$('#catalog-panel').append(planner);
   $('#toggle-timetable').addEventListener('click',()=>toggleCalendar(calendar.hidden));
-  for(const id of ['#catalog-filter','#catalog-sort'])$(id).addEventListener('change',()=>renderCatalog(state.server.control.catalog));
-  $('#course-search').placeholder='搜索课程名、教师、课程号或院系';
+  const updateQuery=()=>{state.query.page=1;$('#query-feedback').textContent='';saveQuery();if(state.server)renderCatalog(state.server.control.catalog);};
+  for(const [id,field] of [['#catalog-filter','availability'],['#catalog-sort','sort'],['#query-type','type'],['#query-credits','credits'],['#query-source','source']])$(id).addEventListener('change',()=>{state.query[field]=$(id).value;updateQuery();});
+  filters.addEventListener('change',event=>{const input=event.target.closest('[data-query-group]');if(!input)return;const group=input.dataset.queryGroup;state.query[group]=[...filters.querySelectorAll(`[data-query-group="${group}"]:checked`)].map(x=>x.value);updateQuery();});
+  $('#query-reset').addEventListener('click',()=>{state.query={...CourseQuery.defaults(),source:state.query.source};updateQuery();});
+  $('#query-science').addEventListener('click',()=>{state.query={...CourseQuery.defaults(),source:state.query.source,credits:'4',years:['2025','2026'],departments:['物理学院','化学与分子工程学院','生命科学学院','城市与环境学院','地球与空间科学学院','心理与认知科学学院']};updateQuery();});
+  $('#query-reload').addEventListener('click',()=>loadCourseLibrary(true));
+  for(const [id,step] of [['#query-prev',-1],['#query-next',1]])$(id).addEventListener('click',()=>{state.query.page+=step;saveQuery();renderCatalog(state.server.control.catalog);$('.catalog-tools').scrollIntoView({block:'start'});});
+  $('#query-export').addEventListener('click',()=>{
+    if(!state.queryMatches.length)return;
+    const courses=state.queryMatches.map(x=>x.course), url=URL.createObjectURL(new Blob([CourseQuery.csv(courses)],{type:'text/csv;charset=utf-8'}));
+    const a=document.createElement('a');a.href=url;a.download='courses-filtered-'+new Date().toISOString().slice(0,10)+'.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+    $('#query-feedback').textContent=`已导出全部 ${courses.length} 条筛选结果（不只本页）；多个查询入口的原始行分别保留。`;
+  });
+  $('.catalog-tools label').textContent='搜索课程库';
+  note.textContent='本地组合筛选，空格分隔多个关键词。课程类型按查询入口；年级不是个人选课资格保证。冲突直接显示在卡片上，缺失时间不会当成无冲突。';
+  $('#course-search').placeholder='课程名、课程号、教师、院系、专业或备注';
   const clearPreview=document.createElement('button');clearPreview.className='button ghost';clearPreview.textContent='清除预览';clearPreview.type='button';calendar.append(clearPreview);
-  clearPreview.addEventListener('click',()=>{state.preview=null;CoursePlanner.render(state.server.control.catalog,state.draft,null);});
+  clearPreview.addEventListener('click',()=>{state.preview=null;CoursePlanner.render(browseCatalog(state.server.control.catalog),state.draft,null);});
   $('#preview-week').innerHTML=Array.from({length:32},(_,i)=>`<option value="${i+1}">第 ${i+1} 周</option>`).join('');
-  $('#preview-week').addEventListener('change',()=>CoursePlanner.render(state.server.control.catalog,state.draft,state.preview));
-  let dark=localStorage.getItem('workbench-theme')==='dark';
-  const applyTheme=()=>{document.documentElement.dataset.theme=dark?'dark':'light';$('#theme-toggle').textContent=dark?'浅色模式':'深色模式';};applyTheme();
-  $('#theme-toggle').addEventListener('click',()=>{dark=!dark;localStorage.setItem('workbench-theme',dark?'dark':'light');applyTheme();});
+  $('#preview-week').addEventListener('change',()=>CoursePlanner.render(browseCatalog(state.server.control.catalog),state.draft,state.preview));
+  let theme='auto';try{theme=localStorage.getItem('workbench-theme')||'auto';}catch{}
+  if(!['auto','light','dark'].includes(theme))theme='auto';
+  const systemTheme=matchMedia('(prefers-color-scheme: dark)');
+  const applyTheme=()=>{document.documentElement.dataset.theme=theme==='auto'?(systemTheme.matches?'dark':'light'):theme;$('#theme-toggle').textContent={auto:'主题：跟随系统',light:'主题：浅色',dark:'主题：深色'}[theme];$('#theme-toggle').title='点击切换：跟随系统 → 浅色 → 深色';};applyTheme();
+  systemTheme.addEventListener('change',applyTheme);
+  $('#theme-toggle').addEventListener('click',()=>{theme={auto:'light',light:'dark',dark:'auto'}[theme];try{localStorage.setItem('workbench-theme',theme);}catch{}applyTheme();});
   $('#available-courses').addEventListener('click',event=>{
     const preview=event.target.closest('[data-preview-course]');if(!preview)return;
-    state.preview=state.server.control.catalog.available[Number(preview.dataset.previewCourse)];
+    state.preview=browseCatalog(state.server.control.catalog).available[Number(preview.dataset.previewCourse)];
     toggleCalendar(true);
-    CoursePlanner.render(state.server.control.catalog,state.draft,state.preview);
+    CoursePlanner.render(browseCatalog(state.server.control.catalog),state.draft,state.preview);
     if(innerWidth<1000)calendar.scrollIntoView({behavior:'smooth',block:'start'});
   });
   document.addEventListener('click',async event=>{
@@ -528,7 +617,7 @@ function bindEvents() {
     } catch (error) { $('#start-dialog').close(); reportError(error); }
     finally { button.disabled = false; }
   });
-  $('#course-search').addEventListener('input', () => renderCatalog(state.server.control.catalog));
+  $('#course-search').addEventListener('input', () => {state.query.q=$('#course-search').value;state.query.page=1;$('#query-feedback').textContent='';saveQuery();if(state.server)renderCatalog(state.server.control.catalog);});
   $('.workflow a[href="#view-plan"]').addEventListener('click', () => setView('plan'));
   $('#export-events').addEventListener('click', () => {
     const content = state.server.runtime.events.map(e => `${new Date(e.timestamp*1000).toLocaleString()} [${e.level}] ${e.message}`).join('\n');
@@ -696,6 +785,13 @@ async function post(url, data) {
 function renderControl() {
   if (!state.server?.control) return;
   const c = state.server.control;
+  const exportState=c.export;
+  const tasksBusy=(state.server.tasks||[]).some(t=>t.state.active);
+  $('#export-courses-start').disabled=!state.connected||!exportState||c.active||tasksBusy;
+  $('#export-courses-stop').hidden=!(c.active&&exportState?.status==='running');
+  $('#export-courses-download').hidden=!exportState?.filename||exportState.status==='running';
+  $('#export-courses-download').textContent=exportState?.complete?'下载完整 CSV':'下载部分 CSV（未完成）';
+  $('#export-courses-status').textContent=!exportState?'需加载新版后端后使用':`${exportState.message} · 已读取 ${exportState.pages||0} 页 / ${exportState.rows||0} 条${exportState.groupsTotal?` · 分类进度 ${exportState.groupsDone||0}/${exportState.groupsTotal}`:''}${tasksBusy?'；请先停止刷课任务，再开始全量查询':''}`;
   showDirectory(state.directory);
   $('#run-target-count').textContent = (state.server.tasks || []).length;
   $('#login-enter').disabled = !state.connected || c.active;
@@ -729,6 +825,7 @@ function renderControl() {
   $('#save-badge').textContent = '待创建课程篮 · 不会自动运行';
   $('#persist-account').disabled = !state.connected || c.active || state.saving;
   renderCatalog(c.catalog);
+  loadCourseLibrary();
   renderJourney();
   renderTaskModules();
 }
@@ -776,33 +873,50 @@ function renderTaskModules(){
 
 function renderCatalog(catalog) {
   if (!catalog) return;
+  const originalCatalog=catalog;
+  catalog=browseCatalog(catalog);
   fillMissingCourseFields(catalog);
-  const query = $('#course-search').value.trim().toLowerCase();
-  const filter=$('#catalog-filter')?.value||'all';
-  const sort=$('#catalog-sort')?.value||'school';
-  const signature = JSON.stringify([catalog, state.draft.courses, query, filter, sort]);
+  const signature = JSON.stringify([originalCatalog, state.draft.courses, state.query, state.library.filename,
+    state.library.modifiedAt,state.library.loading,state.library.error]);
   if (renderCatalog.signature === signature) return;
   renderCatalog.signature = signature;
+  syncQueryControls(catalog.available);
   $('#enrolled-count').textContent = `（${catalog.results.reduce((n,t) => n+t.rows.length, 0)} 门）`;
   const chosen=CoursePlanner.selected(catalog,state.draft);
-  const matches = catalog.available.map((course,index) => ({course,index})).filter(({course}) => `${course.name} ${course.school} ${course.classNo} ${course.teacher||''} ${course.courseCode||''}`.toLowerCase().includes(query) && (filter!=='seats'||course.remaining>0) && (filter!=='basket'||chosen.some(c=>CoursePlanner.same(c,course))));
-  if(sort==='seats')matches.sort((a,b)=>b.course.remaining-a.course.remaining);
-  if(sort==='name')matches.sort((a,b)=>a.course.name.localeCompare(b.course.name,'zh-CN'));
+  const matches=CourseQuery.filter(catalog.available,state.query,chosen,CoursePlanner.same);
+  state.queryMatches=matches;
+  const totalPages=Math.max(1,Math.ceil(matches.length/24));
+  state.query.page=Math.max(1,Math.min(state.query.page,totalPages));
+  const visible=matches.slice((state.query.page-1)*24,state.query.page*24);
+  $('#query-prev').disabled=state.query.page<=1;
+  $('#query-next').disabled=state.query.page>=totalPages;
+  $('#query-page').textContent=`第 ${state.query.page} / ${totalPages} 页 · 每页 24 条`;
+  $('#query-export').disabled=!matches.length;
+  $('#query-reload').disabled=state.library.loading;
   $('#basket-link').textContent=`查看课程篮（${chosen.length}）`;
   $('#basket-strip').textContent=chosen.length?`课程篮：${chosen.map(c=>c.name).join('、')}。仅在本地，创建任务后还需单独启动。`:'先找到课程 → 加入课程篮 → 确认参数并创建任务。加入不会立即选课。';
   if(state.preview)state.preview=catalog.available.find(c=>CoursePlanner.same(c,state.preview))||null;
-  const baseline=[...(catalog.enrolled||[]),...CoursePlanner.selected(catalog,state.draft)];
   CoursePlanner.render(catalog,state.draft,state.preview);
-  $('#catalog-count').textContent = `${matches.length} / ${catalog.available.length} 门 · 第 ${catalog.page || 1} 页`;
-  $('#catalog-note').textContent = `${catalog.note} ${catalog.updatedAt ? '· 最近读取 ' + new Date(catalog.updatedAt * 1000).toLocaleString() : ''}`;
+  $('#catalog-count').textContent = `找到 ${matches.length} / ${catalog.available.length} 条课程记录`;
+  const lib=state.library;
+  $('#catalog-note').textContent=state.query.source==='library'
+    ? lib.error || (lib.loading?'正在载入本地课程库…':lib.filename?`课程库快照 · ${lib.complete?'已完成分类查询':'部分结果，尚不完整'} · ${lib.sourceRows} 条原始记录 · ${new Date(lib.modifiedAt*1000).toLocaleString()}${lib.missingTypes?` · ${lib.missingTypes} 条缺少查询入口，重新更新课程库后才能按类型筛选`:''}。余量非实时；查询不会访问学校。`:'尚未建立本地课程库。展开“更新课程库”，登录后同步一次，之后即可在本地查询。')
+    : `${catalog.note} ${catalog.updatedAt ? '· 最近读取 ' + new Date(catalog.updatedAt * 1000).toLocaleString() : ''}`;
+  if(state.query.source==='library' && catalog.updatedAt)$('#catalog-note').textContent+=` 已选课表对照：${new Date(catalog.updatedAt*1000).toLocaleString()}${catalog.note?.includes('历史缓存')?'（历史缓存，建议刷新）':''}。`;
   $('#enrolled-courses').innerHTML = catalog.results.length ? catalog.results.map(table =>
     `<div class="catalog-table"><table><thead><tr>${table.headers.map(h => `<th>${escapeHtml(h)}</th>`).join('')}</tr></thead><tbody>${table.rows.map(row => `<tr>${row.map(cell => `<td>${escapeHtml(cell)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`).join('') : '尚无成功读取的选课结果';
-  $('#available-courses').innerHTML = matches.length ? matches.map(({course, index}) => {
+  const detailScope=state.query.source+':'+(state.library.filename||'');
+  const openDetails=new Set(renderCatalog.detailScope===detailScope?$$('[data-course-detail][open]').map(e=>e.dataset.courseDetail):[]);
+  renderCatalog.detailScope=detailScope;
+  $('#available-courses').innerHTML = visible.length ? visible.map(({course, index}) => {
     const exists = state.draft.courses.some(c => c.name === course.name && Number(c.classNo) === Number(course.classNo) && c.school === course.school);
-    const check=CoursePlanner.assess(course,baseline);
-    const status=check.teaching.length?'上课冲突':check.exam.length?'考试同半天 · 待核对':check.unknown?'上课时间待核对':'已解析上课时段无冲突';
-    return `<div class="event-row catalog-card ${exists ? 'is-selected' : ''}"><div><strong>${escapeHtml(course.name)}</strong><p>${escapeHtml(course.courseCode||'课程号未提供')} · ${escapeHtml(course.school)} · 班号 ${escapeHtml(course.classNo)}</p><p>${escapeHtml(course.teacher||'教师未提供')} · ${course.credits??'—'} 学分</p><span class="quota ${course.remaining > 0 ? 'has-seats' : ''}">${course.remaining > 0 ? `余量 ${escapeHtml(course.remaining)} / ${escapeHtml(course.quota)}` : '已满 · 可加入等待'}</span> <span class="conflict-badge ${check.teaching.length?'conflict':''}">${status}</span><details><summary>上课与考试原文</summary><p>${escapeHtml(course.schedule?.raw||'时间信息尚未读取，请重新读取课程后核对。')}</p></details></div><div class="panel-actions"><button class="button ghost" data-preview-course="${index}" aria-label="${escapeAttr('预览课表：'+course.name)}">预览课表</button><button class="button secondary" data-add-catalog="${index}" aria-pressed="${exists}" aria-label="${escapeAttr((exists ? '移出本地计划：' : '加入计划：') + course.name + '，班号 ' + course.classNo)}">${exists ? '✓ 已加入 · 移出' : '+ 加入计划'}</button></div></div>`;
-  }).join('') : query ? '没有匹配的课程，试试其他关键词。搜索仅覆盖当前已读取页。' : '还没有课程数据。点击上方“读取 / 刷新课程”，程序会自动读取课程信息。';
+    const check=CoursePlanner.cardConflict(course,catalog.enrolled,chosen);
+    const conflictNote=`<div class="course-conflict-note ${check.kind}"><p class="course-conflict-title">${escapeHtml(check.title)}</p><ul>${check.lines.map(line=>`<li>${escapeHtml(line)}</li>`).join('')}</ul></div>`;
+    const canAdd=course.name&&course.school&&course.classNo!=null;
+    const rawFields=course.rawRows?.[0]||{'课程类别':course.category||'未提供','上课与考试':course.schedule?.raw||'时间未提供'};
+    return `<article class="event-row catalog-card ${exists ? 'is-selected' : ''}"><div><p class="course-type">${escapeHtml(CourseQuery.types(course).join(' / '))}</p><strong>${escapeHtml(course.name)}</strong><p>${escapeHtml(course.courseCode||'课程号未提供')} · ${escapeHtml(course.school||'院系未提供')} · 班号 ${escapeHtml(course.classNo??'未提供')}</p><p>${escapeHtml(course.teacher||'教师未提供')} · ${course.credits??'—'} 学分 · 面向 ${escapeHtml(course.year||'年级未提供')}</p><p class="course-time">${escapeHtml(course.schedule?.raw||'上课时间未提供')}</p><span class="quota ${course.remaining > 0 ? 'has-seats' : ''}">${course.remaining==null?'余量未知':course.remaining > 0 ? `快照余量 ${escapeHtml(course.remaining)} / ${escapeHtml(course.quota)}` : '已满 · 可加入等待'}</span><span class="course-meta"> · P/NP：${escapeHtml(course.pnp||'未提供')}</span>${conflictNote}<details data-course-detail="${index}"><summary>查看全部原始信息</summary><dl class="course-fields">${Object.entries(rawFields).map(([k,v])=>`<div><dt>${escapeHtml(k)}</dt><dd>${escapeHtml(v||'未提供')}</dd></div>`).join('')}</dl></details></div><div class="panel-actions"><button class="button ghost" data-preview-course="${index}" aria-label="${escapeAttr('预览课表：'+course.name)}">预览课表</button><button class="button secondary" data-add-catalog="${index}" ${canAdd?'':'disabled title="课程字段不完整，不能创建任务"'} aria-pressed="${exists}" aria-label="${escapeAttr((exists ? '移出本地计划：' : '加入计划：') + course.name + '，班号 ' + course.classNo)}">${exists ? '✓ 已加入 · 移出' : '+ 加入课程篮'}</button></div></article>`;
+  }).join('') : catalog.available.length?'没有符合全部条件的课程。试试减少条件或点击“清空筛选”；不会自动隐藏缺少时间的课程。':'当前范围暂无课程。可以更新课程库，或切换到“已读取选课页”。';
+  $$('[data-course-detail]').forEach(el=>{el.open=openDetails.has(el.dataset.courseDetail);});
   $$('[data-add-catalog]').forEach(button => button.addEventListener('click', () => {
     const course = catalog.available[Number(button.dataset.addCatalog)];
     const existing = state.draft.courses.findIndex(c => c.name === course.name && Number(c.classNo) === Number(course.classNo) && c.school === course.school);

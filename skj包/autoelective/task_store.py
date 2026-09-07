@@ -15,8 +15,15 @@ class TaskStore:
         self.db.execute('PRAGMA journal_mode=WAL')
         self.db.execute('CREATE TABLE IF NOT EXISTS tasks (account TEXT, id TEXT, data TEXT, PRIMARY KEY(account,id))')
         self.db.execute('CREATE TABLE IF NOT EXISTS cache (account TEXT PRIMARY KEY, data TEXT)')
+        self.db.execute('CREATE TABLE IF NOT EXISTS exports (account TEXT PRIMARY KEY, data TEXT)')
+        self.db.execute('CREATE TABLE IF NOT EXISTS libraries (account TEXT PRIMARY KEY, data TEXT)')
         self.db.commit()
         self.account_key = self.account()
+        previous = self.load_export()
+        if previous and previous.get('filename'):
+            with self.lock, self.db:
+                self.db.execute('INSERT OR IGNORE INTO libraries VALUES (?,?)',
+                                (self.account_key, json.dumps(previous, ensure_ascii=False)))
 
     def account(self):
         cfg = AutoElectiveConfig()
@@ -43,4 +50,23 @@ class TaskStore:
     def load_catalog(self):
         with self.lock:
             row = self.db.execute('SELECT data FROM cache WHERE account=?', (self.account_key,)).fetchone()
+            return json.loads(row[0]) if row else None
+
+    def save_export(self, state):
+        with self.lock, self.db:
+            self.db.execute('INSERT OR REPLACE INTO exports VALUES (?,?)',
+                            (self.account_key, json.dumps(state, ensure_ascii=False)))
+            if state.get('filename'):
+                self.db.execute('INSERT OR REPLACE INTO libraries VALUES (?,?)',
+                                (self.account_key, json.dumps(state, ensure_ascii=False)))
+
+    def load_export(self):
+        with self.lock:
+            row = self.db.execute('SELECT data FROM exports WHERE account=?', (self.account_key,)).fetchone()
+            return json.loads(row[0]) if row else None
+
+    def load_library_export(self):
+        """A failed refresh with no rows must not erase the previous usable library."""
+        with self.lock:
+            row = self.db.execute('SELECT data FROM libraries WHERE account=?', (self.account_key,)).fetchone()
             return json.loads(row[0]) if row else None

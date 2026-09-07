@@ -12,3 +12,27 @@ assert.equal(P.compare(a,b).exam,true);
 assert.equal(P.compare(a,a).teaching,false);
 assert.equal(P.compare({...a,courseCode:'001'}, {...a,courseCode:'002'}).teaching,true);
 console.log('Course planner conflict checks passed');
+
+// Cards explain the exact overlap without requiring a filter or timetable view.
+const candidate=course('待选课',[1,2,3,4,5],1,2,4);
+const enrolled=course('已选甲',[1,3,5],1,1,2);
+const basket=course('篮中乙',[2,3,4],1,4,5);
+let note=P.cardConflict(candidate,[enrolled],[basket,enrolled,candidate]);
+assert.equal(note.kind,'conflict');
+assert.ok(note.lines.some(s=>s.includes('已选课《已选甲》（1 班）')&&s.includes('周一第 2 节（第 1、3、5 周）')));
+assert.ok(note.lines.some(s=>s.includes('课程篮《篮中乙》（1 班）')&&s.includes('周一第 4 节（第 2–4 周）')));
+assert.equal(note.lines.filter(s=>s.includes('已选甲')).length,1);
+assert.ok(!note.lines.some(s=>s.includes('《待选课》')));
+assert.equal(P.cardConflict(candidate,[course('其他',[6,7])],[]).title,'上课时间无冲突');
+assert.equal(P.cardConflict(candidate,undefined,[]).title,'暂不能确认是否冲突');
+assert.equal(P.cardConflict({...candidate,schedule:undefined},[],[]).title,'暂不能确认是否冲突');
+assert.ok(P.cardConflict(candidate,[{name:'时间未知',classNo:1}],[]).lines.some(s=>s.includes('《时间未知》')));
+note=P.cardConflict(a,[b],[]);
+assert.equal(note.title,'上课无冲突，考试时间需核对');
+assert.ok(note.lines.some(s=>s.includes('2027-01-04 上午')&&s.includes('具体时间需核对')));
+assert.equal(P.overlaps(candidate,{...enrolled,schedule:{...enrolled.schedule,sessions:[...enrolled.schedule.sessions,...enrolled.schedule.sessions]}}).length,1);
+const partial={...enrolled,schedule:{...enrolled.schedule,teachingKnown:false}};
+note=P.cardConflict(candidate,[partial],[]);
+assert.equal(note.title,'上课时间冲突');
+assert.ok(note.lines.some(s=>s.includes('无法完成对照')));
+console.log('Course card conflict explanations passed');
